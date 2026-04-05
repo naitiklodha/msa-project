@@ -1,0 +1,80 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: auth-service
+    url: http://auth-service:3001
+    routes:
+      - name: auth-route
+        paths:
+          - /auth
+
+  - name: game-service
+    url: http://game-service:3002
+    routes:
+      - name: game-public
+        paths:
+          - /game/healthz
+          - /game/metrics
+      - name: game-protected
+        paths:
+          - /game
+        plugins:
+          - name: jwt
+            config:
+              secret_is_base64: false
+              run_on_preflight: true
+
+  - name: quiz-service
+    url: http://quiz-service:3003
+    routes:
+      - name: quiz-public
+        paths:
+          - /quiz/healthz
+          - /quiz/metrics
+      - name: quiz-protected
+        paths:
+          - /quiz
+        plugins:
+          - name: jwt
+            config:
+              secret_is_base64: false
+              run_on_preflight: true
+
+  - name: timer-service
+    url: http://timer-service:3004
+    routes:
+      - name: timer-public
+        paths:
+          - /timer/healthz
+          - /timer/metrics
+      - name: timer-protected
+        paths:
+          - /timer
+        plugins:
+          - name: jwt
+            config:
+              secret_is_base64: false
+              run_on_preflight: true
+
+  - name: bff
+    url: http://bff:3010
+    routes:
+      - name: bff-public
+        paths:
+          - /api/healthz
+          - /api/metrics
+      - name: bff-protected
+        paths:
+          - /api
+        plugins:
+          - name: jwt
+            config:
+              secret_is_base64: false
+              run_on_preflight: true
+
+consumers:
+  - username: focuspulse-app
+    jwt_secrets:
+      - key: focuspulse
+        secret: changeme_jwt_secret_min_32_chars!!

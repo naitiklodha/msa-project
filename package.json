@@ -1,0 +1,15 @@
+{
+  "name": "focuspulse",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FocusPulse — Pomodoro + Quiz + Games microservices platform",
+  "scripts": {
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down -v",
+    "docker:logs": "docker compose logs -f",
+    "test:smoke": "bash scripts/smoke-test.sh"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

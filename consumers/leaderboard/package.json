@@ -1,0 +1,10 @@
+{
+  "name": "leaderboard-consumer",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.js",
+  "dependencies": {
+    "@focuspulse/shared": "file:../../shared",
+    "express": "^4.18.2"
+  }
+}
