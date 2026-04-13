@@ -217,6 +217,48 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:6333/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+  rag-service:
+    build:
+      context: .
+      dockerfile: services/rag-service/Dockerfile
+    environment:
+      RAG_SERVICE_PORT: ${RAG_SERVICE_PORT}
+      QDRANT_URL: ${QDRANT_URL}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL}
+      RAG_TOP_K: ${RAG_TOP_K}
+      RAG_CHUNK_SIZE: ${RAG_CHUNK_SIZE}
+      RAG_CHUNK_OVERLAP: ${RAG_CHUNK_OVERLAP}
+      REDIS_URL: ${REDIS_URL}
+      NODE_ENV: production
+    ports:
+      - "${RAG_SERVICE_PORT}:${RAG_SERVICE_PORT}"
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${RAG_SERVICE_PORT}/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 volumes:
   kafka-data:
+  qdrant_storage:
+
+
+
