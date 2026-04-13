@@ -4,7 +4,7 @@ services:
   # The persistent stuff—Postgres for data, Redis for quick lookups, 
   # and Kafka to glue everything together.
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -172,6 +172,26 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:${TIMER_SERVICE_PORT}/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  rag-service:
+    build:
+      context: .
+      dockerfile: services/rag-service/Dockerfile
+    environment:
+      POSTGRES_URL: ${POSTGRES_URL}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      GEMINI_LLM_MODEL: ${GEMINI_LLM_MODEL:-gemini-3.0-flash-preview}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-768}
+    ports:
+      - "${RAG_SERVICE_PORT:-3011}:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/healthz || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 3

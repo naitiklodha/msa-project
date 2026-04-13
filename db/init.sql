@@ -3,6 +3,7 @@
 
 -- We need the uuid extension for gen_random_uuid()
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS vector;
 
 -- Users table (auth-service owns this)
 CREATE TABLE IF NOT EXISTS users (
