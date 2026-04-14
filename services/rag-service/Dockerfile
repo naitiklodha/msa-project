@@ -9,6 +9,7 @@ COPY services/rag-service/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY services/rag-service/main.py .
+COPY services/rag-service/app ./app
 
 EXPOSE 8080
 
