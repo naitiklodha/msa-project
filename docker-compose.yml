@@ -183,7 +183,7 @@ services:
     environment:
       POSTGRES_URL: ${POSTGRES_URL}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
-      GEMINI_LLM_MODEL: ${GEMINI_LLM_MODEL:-gemini-3.0-flash-preview}
+      GEMINI_LLM_MODEL: ${GEMINI_LLM_MODEL:-gemini-2.0-flash}
       EMBEDDING_DIM: ${EMBEDDING_DIM:-768}
     ports:
       - "${RAG_SERVICE_PORT:-3011}:8080"
