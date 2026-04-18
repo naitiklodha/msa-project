@@ -154,7 +154,7 @@ services:
       kafka:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-StHELL", "wget -qO- http://localhost:${TIMER_SERVICE_PORT}/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${TIMER_SERVICE_PORT}/healthz || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 3
