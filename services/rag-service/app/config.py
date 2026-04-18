@@ -11,6 +11,7 @@ LLM_MODEL = os.getenv("GEMINI_LLM_MODEL", "models/gemini-2.5-pro")
 VECTOR_DIM = int(os.getenv("EMBEDDING_DIM", "768"))
 CHUNK_SIZE = int(os.getenv("RAG_CHUNK_SIZE", "1000"))
 CHUNK_OVERLAP = int(os.getenv("RAG_CHUNK_OVERLAP", "200"))
+REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
 
 if not POSTGRES_URL:
     raise RuntimeError("POSTGRES_URL is required.")

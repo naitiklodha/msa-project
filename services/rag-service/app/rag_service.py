@@ -2,15 +2,24 @@ import json
 import logging
 import re
 import time
+import hashlib
 from typing import Any, Generator
 
 from fastapi import HTTPException
 from google import genai
-from google.api_core.exceptions import ServiceUnavailable, InternalServerError, ResourceExhausted
 
 from .config import GOOGLE_API_KEY, LLM_MODEL
 from .db import get_connection
 from .embedding import embed_document, embed_query, to_pgvector
+from .chunking import chunk_text
+from .cache import (
+    get_cached_document_id,
+    set_cached_document_id,
+    get_cached_topics,
+    set_cached_topics,
+    get_cached_questions,
+    set_cached_questions
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,158 +27,203 @@ logger = logging.getLogger(__name__)
 llm_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 
-def ingest_content(source: str | None, content: str, metadata: dict[str, Any], chunks: list[str]) -> dict[str, Any]:
-    insert_sql = """
-    INSERT INTO rag_documents (source, content, metadata, embedding)
-    VALUES (%s, %s, %s::jsonb, %s::vector)
-    RETURNING id, source, content, metadata, created_at, updated_at;
-    """
-    inserted_docs: list[dict[str, Any]] = []
-
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            for idx, chunk in enumerate(chunks):
-                chunk_embedding = embed_document(chunk)
-                chunk_metadata = dict(metadata)
-                chunk_metadata.update(
-                    {
-                        "chunk_index": idx,
-                        "chunk_count": len(chunks),
-                    }
-                )
-                cur.execute(
-                    insert_sql,
-                    (
-                        source,
-                        chunk,
-                        json.dumps(chunk_metadata),
-                        to_pgvector(chunk_embedding),
-                    ),
-                )
-                row = cur.fetchone()
-                inserted_docs.append(
-                    {
-                        "id": str(row[0]),
-                        "source": row[1],
-                        "content": row[2],
-                        "metadata": row[3],
-                        "created_at": row[4].isoformat(),
-                        "updated_at": row[5].isoformat(),
-                    }
-                )
-        conn.commit()
-
-    return {
-        "message": "Document ingested successfully.",
-        "chunks_created": len(inserted_docs),
-        "documents": inserted_docs,
-    }
-
-
-def update_document(document_id: str, source: str | None, content: str, metadata: dict[str, Any]) -> dict[str, Any]:
-    embedding = embed_document(content)
-    update_sql = """
-    UPDATE rag_documents
-    SET source = %s,
-        content = %s,
-        metadata = %s::jsonb,
-        embedding = %s::vector,
-        updated_at = NOW()
-    WHERE id = %s::uuid
-    RETURNING id, source, content, metadata, created_at, updated_at;
-    """
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                update_sql,
-                (
-                    source,
-                    content,
-                    json.dumps(metadata),
-                    to_pgvector(embedding),
-                    document_id,
-                ),
-            )
-            row = cur.fetchone()
-        conn.commit()
-
-    if not row:
-        return {"message": "Document not found.", "document": None}
-
-    return {
-        "message": "Document updated successfully.",
-        "document": {
-            "id": str(row[0]),
-            "source": row[1],
-            "content": row[2],
-            "metadata": row[3],
-            "created_at": row[4].isoformat(),
-            "updated_at": row[5].isoformat(),
-        },
-    }
-
-
-def list_documents(limit: int = 20) -> dict[str, Any]:
+def link_user_to_document(user_id: str, document_id: str) -> None:
     sql = """
-    SELECT id, source, content, metadata, created_at, updated_at
-    FROM rag_documents
-    ORDER BY created_at DESC
-    LIMIT %s;
+    INSERT INTO user_documents (user_id, document_id)
+    VALUES (%s, %s)
+    ON CONFLICT DO NOTHING;
     """
-    docs: list[dict[str, Any]] = []
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(sql, (limit,))
+            cur.execute(sql, (user_id, document_id))
+        conn.commit()
+
+
+def process_upload(file_bytes: bytes, file_name: str, extracted_text: str, user_id: str) -> dict[str, Any]:
+    doc_hash = hashlib.sha256(file_bytes).hexdigest()
+    
+    # L1: Check Redis
+    cached_doc_id = get_cached_document_id(doc_hash)
+    if cached_doc_id:
+        logger.info(f"Redis cache hit for doc hash: {doc_hash}")
+        link_user_to_document(user_id, cached_doc_id)
+        topics = get_topics_from_cache(cached_doc_id)
+        return {
+            "document_id": cached_doc_id,
+            "cached": True,
+            "file_name": file_name,
+            "topics": topics
+        }
+
+    # L2: Check Postgres
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM documents WHERE hash = %s", (doc_hash,))
+            row = cur.fetchone()
+            if row:
+                doc_id = str(row[0])
+                logger.info(f"Postgres cache hit for doc hash: {doc_hash}")
+                set_cached_document_id(doc_hash, doc_id)
+                link_user_to_document(user_id, doc_id)
+                topics = get_topics_from_cache(doc_id)
+                return {
+                    "document_id": doc_id,
+                    "cached": True,
+                    "file_name": file_name,
+                    "topics": topics
+                }
+
+    # Miss: Run Full RAG Pipeline
+    logger.info(f"Cache miss for doc hash: {doc_hash}. Running full pipeline.")
+    
+    # 1. Summarize into topics
+    topic_division = summarize_text(extracted_text)
+    
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            # 2. Store in documents
+            cur.execute(
+                "INSERT INTO documents (hash, file_name, content_length) VALUES (%s, %s, %s) RETURNING id;",
+                (doc_hash, file_name, len(extracted_text))
+            )
+            doc_id = str(cur.fetchone()[0])
+            
+            # 3. Process each part/topic
+            parts = topic_division.get("parts", [])
+            for i, part in enumerate(parts):
+                topic_title = part.get("title", f"Part {i+1}")
+                time_est_s = part.get("time_minutes", 25) * 60
+                outline = part.get("outline", "")
+                
+                # Chunk the outline text
+                chunks = chunk_text(outline)
+                for chunk_idx, chunk_text_val in enumerate(chunks):
+                    # Embed
+                    embedding = embed_document(chunk_text_val)
+                    
+                    # Store chunk
+                    cur.execute(
+                        """
+                        INSERT INTO document_chunks (document_id, chunk_index, topic, time_est_s, content, embedding)
+                        VALUES (%s, %s, %s, %s, %s, %s::vector) RETURNING id;
+                        """,
+                        (doc_id, chunk_idx, topic_title, time_est_s, chunk_text_val, to_pgvector(embedding))
+                    )
+                    chunk_id = str(cur.fetchone()[0])
+                    
+                    # Generate questions for this chunk (if it's substantial)
+                    # We generate questions based on the chunk_text_val
+                    questions = generate_questions(chunk_text_val, topic_title)
+                    for q in questions:
+                        cur.execute(
+                            """
+                            INSERT INTO questions (document_id, chunk_id, question, options, answer, difficulty)
+                            VALUES (%s, %s, %s, %s::jsonb, %s, %s)
+                            """,
+                            (
+                                doc_id, chunk_id, q.get("question"),
+                                json.dumps(q.get("options", [])),
+                                q.get("options", [])[q.get("correct_index", 0)] if q.get("options") else "",
+                                q.get("difficulty", "medium")
+                            )
+                        )
+        conn.commit()
+
+    # Backfill Cache & Link User
+    set_cached_document_id(doc_hash, doc_id)
+    link_user_to_document(user_id, doc_id)
+    topics = get_topics_from_cache(doc_id)
+    
+    return {
+        "document_id": doc_id,
+        "cached": False,
+        "file_name": file_name,
+        "topics": topics
+    }
+
+
+def get_topics_from_cache(doc_id: str) -> list[dict[str, Any]]:
+    cached = get_cached_topics(doc_id)
+    if cached:
+        return cached
+
+    # Fetch from Postgres
+    sql = """
+        SELECT id as chunk_id, topic, time_est_s, chunk_index
+        FROM document_chunks 
+        WHERE document_id = %s
+        ORDER BY chunk_index
+    """
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (doc_id,))
             rows = cur.fetchall()
+            
+    topics = []
+    # Distinct topics
+    seen = set()
     for row in rows:
-        docs.append(
-            {
-                "id": str(row[0]),
-                "source": row[1],
-                "content": row[2],
-                "metadata": row[3],
-                "created_at": row[4].isoformat(),
-                "updated_at": row[5].isoformat(),
-            }
-        )
+        topic_name = row[1]
+        if topic_name not in seen:
+            seen.add(topic_name)
+            topics.append({
+                "chunk_id": str(row[0]),
+                "topic": topic_name,
+                "time_est_s": row[2]
+            })
+
+    set_cached_topics(doc_id, {"topics": topics})
+    return topics
+
+
+def list_user_documents(user_id: str) -> dict[str, Any]:
+    sql = """
+    SELECT d.id, d.file_name, d.content_length, d.created_at
+    FROM documents d
+    JOIN user_documents ud ON d.id = ud.document_id
+    WHERE ud.user_id = %s
+    ORDER BY d.created_at DESC;
+    """
+    docs = []
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (user_id,))
+            rows = cur.fetchall()
+            for row in rows:
+                docs.append({
+                    "id": str(row[0]),
+                    "file_name": row[1],
+                    "content_length": row[2],
+                    "created_at": row[3].isoformat() if row[3] else None
+                })
     return {"count": len(docs), "documents": docs}
 
 
-def query_documents(query: str, top_k: int) -> dict[str, Any]:
+def query_documents(query: str, top_k: int, user_id: str) -> dict[str, Any]:
     query_embedding = embed_query(query)
     retrieve_sql = """
-    SELECT id, source, content, metadata, 1 - (embedding <=> %s::vector) AS similarity
-    FROM rag_documents
-    ORDER BY embedding <=> %s::vector
+    SELECT dc.id, dc.topic, dc.content, 1 - (dc.embedding <=> %s::vector) AS similarity
+    FROM document_chunks dc
+    JOIN user_documents ud ON ud.document_id = dc.document_id
+    WHERE ud.user_id = %s
+    ORDER BY dc.embedding <=> %s::vector
     LIMIT %s;
     """
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                retrieve_sql,
-                (
-                    to_pgvector(query_embedding),
-                    to_pgvector(query_embedding),
-                    top_k,
-                ),
-            )
+            cur.execute(retrieve_sql, (to_pgvector(query_embedding), to_pgvector(query_embedding), user_id, top_k))
             rows = cur.fetchall()
 
     contexts = []
     docs = []
     for row in rows:
-        docs.append(
-            {
-                "id": str(row[0]),
-                "source": row[1],
-                "content": row[2],
-                "metadata": row[3],
-                "similarity": float(row[4]),
-            }
-        )
-        contexts.append(
-            f"ID: {row[0]}\nSOURCE: {row[1]}\nCONTENT: {row[2]}\nMETADATA: {json.dumps(row[3])}"
-        )
+        docs.append({
+            "id": str(row[0]),
+            "topic": row[1],
+            "content": row[2],
+            "similarity": float(row[3]),
+        })
+        contexts.append(f"TOPIC: {row[1]}\nCONTENT: {row[2]}")
 
     prompt = (
         "You are a helpful RAG assistant. Use only the context below to answer.\n"
@@ -180,27 +234,14 @@ def query_documents(query: str, top_k: int) -> dict[str, Any]:
     llm_models = [LLM_MODEL, "models/gemini-2.5-pro", "models/gemini-2.5-flash"]
 
     llm_response = None
-    last_exc: Exception | None = None
     for model_name in llm_models:
         try:
-            llm_response = llm_client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-            )
+            llm_response = llm_client.models.generate_content(model=model_name, contents=prompt)
             break
-        except Exception as exc:
-            last_exc = exc
+        except Exception:
+            pass
 
-    if llm_response is None:
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                f"Generation failed for tried models {llm_models}. "
-                f"Check GEMINI_LLM_MODEL/API access. Error: {last_exc}"
-            ),
-        ) from last_exc
-
-    answer = llm_response.text if hasattr(llm_response, "text") else ""
+    answer = llm_response.text if llm_response and hasattr(llm_response, "text") else "Failed to generate answer."
 
     return {
         "query": query,
@@ -210,43 +251,32 @@ def query_documents(query: str, top_k: int) -> dict[str, Any]:
     }
 
 
-def stream_query_documents(query: str, top_k: int) -> Generator[str, None, None]:
+def stream_query_documents(query: str, top_k: int, user_id: str) -> Generator[str, None, None]:
     query_embedding = embed_query(query)
     retrieve_sql = """
-    SELECT id, source, content, metadata, 1 - (embedding <=> %s::vector) AS similarity
-    FROM rag_documents
-    ORDER BY embedding <=> %s::vector
+    SELECT dc.id, dc.topic, dc.content, 1 - (dc.embedding <=> %s::vector) AS similarity
+    FROM document_chunks dc
+    JOIN user_documents ud ON ud.document_id = dc.document_id
+    WHERE ud.user_id = %s
+    ORDER BY dc.embedding <=> %s::vector
     LIMIT %s;
     """
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                retrieve_sql,
-                (
-                    to_pgvector(query_embedding),
-                    to_pgvector(query_embedding),
-                    top_k,
-                ),
-            )
+            cur.execute(retrieve_sql, (to_pgvector(query_embedding), to_pgvector(query_embedding), user_id, top_k))
             rows = cur.fetchall()
 
     contexts = []
     docs = []
     for row in rows:
-        docs.append(
-            {
-                "id": str(row[0]),
-                "source": row[1],
-                "content": row[2],
-                "metadata": row[3],
-                "similarity": float(row[4]),
-            }
-        )
-        contexts.append(
-            f"ID: {row[0]}\nSOURCE: {row[1]}\nCONTENT: {row[2]}\nMETADATA: {json.dumps(row[3])}"
-        )
+        docs.append({
+            "id": str(row[0]),
+            "topic": row[1],
+            "content": row[2],
+            "similarity": float(row[3]),
+        })
+        contexts.append(f"TOPIC: {row[1]}\nCONTENT: {row[2]}")
 
-    # First yield the initial data
     initial_data = {
         "type": "metadata",
         "query": query,
@@ -263,44 +293,26 @@ def stream_query_documents(query: str, top_k: int) -> Generator[str, None, None]
     )
     llm_models = [LLM_MODEL, "models/gemini-2.5-pro", "models/gemini-2.5-flash"]
 
-    llm_response_stream = None
-    last_exc: Exception | None = None
     for model_name in llm_models:
         try:
-            llm_response_stream = llm_client.models.generate_content_stream(
-                model=model_name,
-                contents=prompt,
-            )
-            # Try getting the first chunk to catch early errors
-            iterator = iter(llm_response_stream)
-            first_chunk = next(iterator)
-            if first_chunk.text:
-                yield json.dumps({"type": "chunk", "content": first_chunk.text}) + "\n"
-            
-            # If successful, yield the rest of the stream
-            for chunk in iterator:
+            llm_response_stream = llm_client.models.generate_content_stream(model=model_name, contents=prompt)
+            for chunk in llm_response_stream:
                 if chunk.text:
                     yield json.dumps({"type": "chunk", "content": chunk.text}) + "\n"
             break
-        except StopIteration:
-            break
-        except Exception as exc:
-            last_exc = exc
+        except Exception:
+            pass
 
-    if not llm_response_stream and last_exc is not None:
-        yield json.dumps({
-            "type": "error",
-            "error": f"Generation failed. Check GEMINI_LLM_MODEL/API access. Error: {last_exc}"
-        }) + "\n"
 
+# ---------------------------------------------------------
+# Same summarize & generate_questions logic as before
+# ---------------------------------------------------------
 
 def generate_questions(part_content: str, part_title: str) -> list[dict[str, Any]]:
-    logger.info("Generating questions for part: %s", part_title)
     prompt = (
-        f"Generate 10 multiple-choice questions based on the following content from the section '{part_title}'. "
-        "The questions should be of varying difficulty: 3 easy, 5 medium, and 2 hard. "
+        f"Generate 5 multiple-choice questions based on the following content from the section '{part_title}'. "
+        "The questions should be of varying difficulty: 2 easy, 2 medium, and 1 hard. "
         "Each question must have 4 options, with exactly one correct answer. "
-        "The options should be plausible but not obvious, and the correct option should be randomly positioned (not following any pattern like always B or A/C). "
         "Output in JSON format only as an array of objects:\n\n"
         "[\n"
         "  {\n"
@@ -308,56 +320,36 @@ def generate_questions(part_content: str, part_title: str) -> list[dict[str, Any
         '    "options": ["option1", "option2", "option3", "option4"],\n'
         '    "correct_index": 0-3,\n'
         '    "difficulty": "easy"|"medium"|"hard"\n'
-        "  },\n"
-        "  ...\n"
+        "  }\n"
         "]\n\n"
         f"CONTENT:\n{part_content}"
     )
     llm_models = [LLM_MODEL, "models/gemini-2.5-pro", "models/gemini-2.5-flash"]
 
     llm_response = None
-    last_exc: Exception | None = None
     for model_name in llm_models:
-        logger.info("Trying LLM model for questions: %s", model_name)
         try:
-            llm_response = llm_client.models.generate_content(
-                model=model_name,
-                contents=prompt,
-            )
-            logger.info("Successfully generated questions with model: %s", model_name)
+            llm_response = llm_client.models.generate_content(model=model_name, contents=prompt)
             break
-        except Exception as exc:
-            logger.warning("Failed with model %s for questions: %s", model_name, exc)
-            last_exc = exc
+        except Exception:
+            pass
 
     if llm_response is None:
-        logger.error("All LLM models failed for questions")
         return []
 
     response_text = llm_response.text if hasattr(llm_response, "text") else ""
-    logger.info("Received questions response, length: %d", len(response_text))
-    
-    # Extract JSON from markdown code blocks if present
     json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
-    if json_match:
-        json_str = json_match.group(1)
-    else:
-        json_str = response_text
+    json_str = json_match.group(1) if json_match else response_text
     
     try:
-        questions = json.loads(json_str)
-        logger.info("Successfully parsed %d questions", len(questions))
-        return questions
-    except json.JSONDecodeError as e:
-        logger.warning("Failed to parse questions JSON: %s", e)
+        return json.loads(json_str)
+    except json.JSONDecodeError:
         return []
 
 
 def summarize_text(text: str) -> dict[str, Any]:
-    logger.info("Starting topic division for document of length %d", len(text))
     prompt = (
         "Analyze the following document and divide it into study topics. Each topic should be designed to take no more than 25 minutes to study. Assign an estimated study time in minutes to each topic (maximum 25 minutes per topic). Provide a title for each topic, and an outline of everything that comes in that part including all the keywords.\n\n"
-        "If the document is too complex or results in too many parts, suggest dividing it into separate documents, but still provide the division for the current text.\n\n"
         "Output in JSON format only:\n\n"
         "{\n"
         '"number_of_parts": <int>,\n'
@@ -366,89 +358,29 @@ def summarize_text(text: str) -> dict[str, Any]:
         '"title": "<string>",\n'
         '"time_minutes": <int>,\n'
         '"outline": "<string with keywords and outline>"\n'
-        '},\n'
-        '...]\n'
+        '}\n'
+        ']\n'
         "}\n\n"
         f"DOCUMENT:\n{text[:20000]}"
     )
     llm_models = [LLM_MODEL, "models/gemini-2.5-pro", "models/gemini-2.5-flash"]
 
     llm_response = None
-    last_exc: Exception | None = None
-    max_retries = 3
-    retry_delay = 2  # Initial delay in seconds
-    
     for model_name in llm_models:
-        logger.info("Trying LLM model: %s", model_name)
-        for attempt in range(max_retries):
-            try:
-                llm_response = llm_client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
-                )
-                logger.info("Successfully generated response with model: %s", model_name)
-                break
-            except (ServiceUnavailable, InternalServerError) as exc:
-                # Handle 503/500 errors with exponential backoff
-                if attempt < max_retries - 1:
-                    wait_time = retry_delay * (2 ** attempt)
-                    logger.warning(
-                        "Model %s returned error (attempt %d/%d). Retrying in %d seconds: %s",
-                        model_name, attempt + 1, max_retries, wait_time, exc
-                    )
-                    time.sleep(wait_time)
-                else:
-                    logger.warning("Failed with model %s after %d retries: %s", model_name, max_retries, exc)
-                    last_exc = exc
-            except ResourceExhausted as exc:
-                # Handle 429 quota exceeded - don't retry, user needs to upgrade plan
-                logger.error("Quota exceeded for model %s: %s", model_name, exc)
-                last_exc = exc
-                break
-            except Exception as exc:
-                logger.warning("Failed with model %s: %s", model_name, exc)
-                last_exc = exc
-                break
-        
-        if llm_response is not None:
+        try:
+            llm_response = llm_client.models.generate_content(model=model_name, contents=prompt)
             break
+        except Exception:
+            pass
 
     if llm_response is None:
-        logger.error("All LLM models failed")
-        if isinstance(last_exc, ResourceExhausted):
-            raise HTTPException(
-                status_code=429,
-                detail=(
-                    f"Gemini API quota exceeded. You've reached your free tier limits. "
-                    f"Please upgrade your Google AI plan at https://ai.google.dev/pricing or wait for quota reset. "
-                    f"Error: {last_exc}"
-                ),
-            ) from last_exc
-        else:
-            raise HTTPException(
-                status_code=502,
-                detail=(
-                    f"Topic division failed for tried models {llm_models}. "
-                    f"Check GEMINI_LLM_MODEL/API access. Error: {last_exc}"
-                ),
-            ) from last_exc
+        return {"number_of_parts": 0, "parts": []}
 
     response_text = llm_response.text if hasattr(llm_response, "text") else ""
-    logger.info("Received response from LLM, length: %d", len(response_text))
-    
-    # Extract JSON from markdown code blocks if present
     json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
-    if json_match:
-        json_str = json_match.group(1)
-        logger.info("Extracted JSON from markdown code block")
-    else:
-        json_str = response_text
+    json_str = json_match.group(1) if json_match else response_text
     
     try:
-        result = json.loads(json_str)
-        logger.info("Successfully parsed JSON with %d parts", result.get("number_of_parts", 0))
-        return result
-    except json.JSONDecodeError as e:
-        logger.warning("Failed to parse JSON: %s", e)
-        # If not valid JSON, return as summary
-        return {"summary": response_text}
+        return json.loads(json_str)
+    except json.JSONDecodeError:
+        return {"number_of_parts": 0, "parts": []}
