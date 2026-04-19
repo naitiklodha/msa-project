@@ -7,7 +7,14 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, Dep
 from ..file_processing import extract_text_from_file
 from ..rag_service import process_upload, list_user_documents
 from ..auth import get_current_user
-from ..cache import get_cached_topics, get_cached_questions, start_quiz_session
+from ..cache import (
+    get_cached_topics, 
+    get_cached_questions, 
+    start_quiz_session,
+    record_session_result,
+    get_session_results
+)
+from ..kafka_producer import emit_event
 
 logger = logging.getLogger(__name__)
 
@@ -116,7 +123,12 @@ def next_question(session_id: str, user_id: str = Depends(get_current_user)) -> 
 
 
 @router.post("/quiz/submit")
-def submit_answer(question_id: str, was_correct: bool, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
+def submit_answer(
+    question_id: str = Query(...), 
+    was_correct: bool = Query(...), 
+    session_id: str = Query(..., description="The ID of the current quiz session"),
+    user_id: str = Depends(get_current_user)
+) -> dict[str, Any]:
     from ..db import get_connection
     sql = """
     INSERT INTO user_question_attempts (user_id, question_id, was_correct)
@@ -127,4 +139,38 @@ def submit_answer(question_id: str, was_correct: bool, user_id: str = Depends(ge
         with conn.cursor() as cur:
             cur.execute(sql, (user_id, question_id, was_correct))
         conn.commit()
+    
+    # Also record in session for score calculation
+    record_session_result(session_id, was_correct)
+    
     return {"status": "recorded"}
+
+
+@router.post("/quiz/{session_id}/complete")
+def complete_quiz(session_id: str, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
+    results = get_session_results(session_id)
+    if not results:
+        # Maybe user finished without answering anything or session expired
+        return {"score": 0, "correct_count": 0, "total": 0}
+        
+    correct_count = sum(1 for r in results if r)
+    total = len(results)
+    # Simple scoring: 10 points per correct answer
+    score = correct_count * 10
+    
+    # Emit event to Kafka for game-service to pick up
+    event_data = {
+        "userId": user_id,
+        "sessionId": session_id,
+        "score": score,
+        "correctAnswers": correct_count,
+        "totalQuestions": total,
+        "timestamp": "now" 
+    }
+    emit_event("game-events", "QUIZ_COMPLETED", event_data)
+    
+    return {
+        "score": score,
+        "correct_count": correct_count,
+        "total": total
+    }

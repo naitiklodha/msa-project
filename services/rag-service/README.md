@@ -1,83 +1,89 @@
 # RAG Service
 
-This is the Retrieval-Augmented Generation (RAG) backend service for the MSA project. It handles document ingestion, vector storage using PostgreSQL + pgvector, and query answering using Google's Gemini models.
+The Retrieval-Augmented Generation (RAG) service handles document processing, chunking, embedding storage, and intelligent quiz generation.
 
 ## Features
+- **Document Processing**: Supports PDF, DOCX, PPTX, and TXT.
+- **Persistent Storage**: Stores document metadata and chunks in Postgres (with `pgvector`).
+- **Caching**: Uses Redis for fast topic and question retrieval.
+- **Intelligent Quiz**: Generates questions based on document content using Gemini AI.
+- **Event-Driven**: Emits `QUIZ_COMPLETED` events to Kafka to update user scores in the `game-service`.
 
-- **Document Ingestion**: Chunking and embedding of documents.
-- **Vector Search**: Semantic similarity search using `pgvector` inside PostgreSQL.
-- **Query Answering**: Answers questions based on ingested context using Gemini models.
-- **Streaming Responses**: Supports Server-Sent Events (NDJSON) to stream generated text chunk by chunk for faster perceived latency.
-- **Quiz Generation**: Automatically generate multiple-choice quizzes from chunks of content.
+## Setup & Running
 
-## Prerequisites
+### Prerequisites
+- Docker and Docker Compose
+- Google API Key (Gemini)
 
-Before running the service, you need:
+### Environment Variables
+The service requires the following environment variables (usually passed via `docker-compose.yml` or `.env`):
+- `POSTGRES_URL`: Connection string for Postgres (with pgvector).
+- `GOOGLE_API_KEY`: Your Gemini API key.
+- `JWT_SECRET`: The same secret used by `auth-service` to decode user tokens.
+- `REDIS_URL`: URL for the Redis cache.
+- `KAFKA_BROKERS`: List of Kafka brokers (e.g., `kafka:9092`).
 
-1. **Python 3.10+**
-2. **PostgreSQL Database** with the `pgvector` extension enabled.
-3. **Google Gemini API Key**
-
-## Environment Variables
-
-Create a `.env` file in the `rag-service` directory (or use your existing one). It should look like this:
-
-```env
-# Required
-POSTGRES_URL="postgresql://user:password@localhost:5432/dbname"
-GOOGLE_API_KEY="your_google_genai_api_key_here"
-
-# Optional Overrides
-GEMINI_LLM_MODEL="models/gemini-2.5-pro" # Default LLM model
-EMBEDDING_MODEL="models/gemini-embedding-001" # Default embedding model
-EMBEDDING_DIM="768" # Dimension size for vector embeddings
-RAG_CHUNK_SIZE="1000" # Size of chunks during document parsing
-RAG_CHUNK_OVERLAP="200" # Overlap size for chunks
+### Running with Docker
+From the project root:
+```bash
+docker-compose up -d rag-service
 ```
 
-## Setup & Running the Service
+## Testing the End-to-End Flow
 
-1. **Activate the Virtual Environment**:
-   Ensure you are in the `services/rag-service` directory, then activate the virtual environment.
+We have provided a comprehensive test script `test_e2e_flow.py` in the project root to verify the entire lifecycle from user creation to score update.
+
+### Steps to Test:
+
+1. **Ensure all services are running**:
    ```bash
-   # On Windows
-   .\.venv\Scripts\activate
-
-   # On Mac/Linux
-   source .venv/bin/activate
+   docker-compose up -d
    ```
 
-2. **Install Dependencies**:
-   If you haven't already:
+2. **Run the E2E Test Script**:
    ```bash
-   pip install -r requirements.txt
+   python test_e2e_flow.py
    ```
 
-3. **Start the Development Server**:
-   You can run the FastAPI application using `uvicorn`:
+### Manual Testing Flow:
+
+If you want to test manually via `curl` or Postman:
+
+1. **Register & Login**:
+   Obtain a JWT token from the `auth-service` via `POST /auth/login`.
+
+2. **Upload Document**:
    ```bash
-   uvicorn app.main:app --reload
+   curl -X POST http://localhost:8000/documents/upload/breakdown-with-questions \
+     -H "Authorization: Bearer <YOUR_TOKEN>" \
+     -F "file=@your_document.pdf"
+   ```
+   Take note of the `document_id` and the `chunk_id` from the topics returned.
+
+3. **Start Quiz**:
+   ```bash
+   curl -X POST "http://localhost:8000/documents/quiz/start?document_id=<DOC_ID>&chunk_id=<CHUNK_ID>" \
+     -H "Authorization: Bearer <YOUR_TOKEN>"
+   ```
+   Save the `session_id`.
+
+4. **Submit Answers**:
+   For each question:
+   ```bash
+   curl -X POST "http://localhost:8000/documents/quiz/submit?question_id=<Q_ID>&was_correct=true&session_id=<SESSION_ID>" \
+     -H "Authorization: Bearer <YOUR_TOKEN>"
    ```
 
-The server will start on `http://127.0.0.0:8000`. You can visit `http://127.0.0.1:8000/docs` to see the auto-generated Swagger UI and test the endpoints directly!
+5. **Complete Quiz**:
+   ```bash
+   curl -X POST "http://localhost:8000/documents/quiz/<SESSION_ID>/complete" \
+     -H "Authorization: Bearer <YOUR_TOKEN>"
+   ```
+   This triggers a Kafka event.
 
-## API Endpoints
+6. **Verify Score**:
+   Check `http://localhost:8000/game/stats` to see if the user's score has increased.
 
-### Querying
-
-* **`POST /query`**: Ask a question. Returns the retrieved `documents` and the `answer` in a single JSON response.
-* **`POST /query/stream`**: Ask a question and receive the response in **NDJSON** (Newline Delimited JSON). The first chunk contains the retrieved documents (`type: metadata`), and subsequent chunks stream the generated text piece by piece (`type: chunk`).
-
-### Documents Management
-
-* **`POST /documents/ingest`**: Ingest new content directly by providing text. The text will be chunked, embedded, and stored in the database.
-* **`POST /documents/upload`**: Upload a file (e.g., PDF) to extract text, summarize topic divisions, and automatically ingest it as one or multiple documents based on the breakdown.
-* **`POST /documents/upload/summary`**: Upload a file and get a summary/topic division breakdown WITHOUT ingesting it into the database.
-* **`POST /documents/upload/breakdown-with-questions`**: Upload a file to get a full topic breakdown along with automatically generated quiz questions for each topic part.
-* **`POST /documents/generate-questions`**: Generate a set of multiple-choice questions for a specific block of content.
-* **`PUT /documents/{id}`**: Update an existing document's content and metadata.
-* **`GET /documents`**: List recently ingested documents.
-
-### Health Check
-
-* **`GET /health`**: Returns the API status.
+## API Documentation
+Once the service is running, you can view the interactive API docs at:
+`http://localhost:3005/docs` (or via Kong if exposed)

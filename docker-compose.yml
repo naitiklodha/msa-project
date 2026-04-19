@@ -170,6 +170,8 @@ services:
       EMBEDDING_DIM: ${EMBEDDING_DIM:-768}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       PORT: ${RAG_SERVICE_PORT}
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
  
     depends_on:
       postgres:

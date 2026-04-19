@@ -12,9 +12,14 @@ VECTOR_DIM = int(os.getenv("EMBEDDING_DIM", "768"))
 CHUNK_SIZE = int(os.getenv("RAG_CHUNK_SIZE", "1000"))
 CHUNK_OVERLAP = int(os.getenv("RAG_CHUNK_OVERLAP", "200"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://redis:6379")
+JWT_SECRET = os.getenv("JWT_SECRET")
+KAFKA_BROKERS = os.getenv("KAFKA_BROKERS", "kafka:9092")
 
 if not POSTGRES_URL:
     raise RuntimeError("POSTGRES_URL is required.")
 
 if not GOOGLE_API_KEY:
     raise RuntimeError("GOOGLE_API_KEY is required.")
+
+if not JWT_SECRET:
+    raise RuntimeError("JWT_SECRET is required.")

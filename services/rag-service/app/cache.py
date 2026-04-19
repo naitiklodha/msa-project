@@ -104,6 +104,29 @@ def get_next_question_id(session_id: str) -> Optional[str]:
         return None
 
 
+def record_session_result(session_id: str, is_correct: bool) -> None:
+    if not redis_client:
+        return
+    try:
+        results_key = f"session:{session_id}:results"
+        redis_client.rpush(results_key, "1" if is_correct else "0")
+        redis_client.expire(results_key, 1800)
+    except Exception as e:
+        logger.error(f"Redis error (record result): {e}")
+
+
+def get_session_results(session_id: str) -> list[bool]:
+    if not redis_client:
+        return []
+    try:
+        results_key = f"session:{session_id}:results"
+        items = redis_client.lrange(results_key, 0, -1)
+        return [item == "1" for item in items]
+    except Exception as e:
+        logger.error(f"Redis error (get results): {e}")
+        return []
+
+
 def invalidate_document_cache(doc_id: str) -> None:
     if not redis_client:
         return

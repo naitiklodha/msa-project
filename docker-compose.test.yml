@@ -1,0 +1,16 @@
+services:
+  tester:
+    image: python:3.11-slim
+    volumes:
+      - .:/app
+    working_dir: /app
+    environment:
+      - BASE_URL=http://kong:8000
+    command: >
+      sh -c "pip install requests && python test_e2e_flow.py"
+    networks:
+      - msa-project_default
+
+networks:
+  msa-project_default:
+    external: true
