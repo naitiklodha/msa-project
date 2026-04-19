@@ -150,4 +150,4 @@ consumers:
   - username: focuspulse-app
     jwt_secrets:
       - key: focuspulse
-        secret: changeme_jwt_secret_min_32_chars!!
+        secret: b8e83891c8103c8e30ab72aa12321811462f8e1f4bbf32ced8e8a7d1050d3009

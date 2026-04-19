@@ -4,15 +4,17 @@ services:
   # The persistent stuff—Postgres for data, Redis for quick lookups, 
   # and Kafka to glue everything together.
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     environment:
-      POSTGRES_USER: focuspulse
-      POSTGRES_PASSWORD: changeme_pg
-      POSTGRES_DB: focuspulse
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U focuspulse"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -58,13 +60,13 @@ services:
   kong:
     image: kong:3.4
     environment:
-      KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_DATABASE: ${KONG_DATABASE}
+      KONG_DECLARATIVE_CONFIG: ${KONG_DECLARATIVE_CONFIG}
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_ADMIN_ERROR_LOG: /dev/stderr
-      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_ADMIN_LISTEN: ${KONG_ADMIN_LISTEN:-0.0.0.0:8001}
       KONG_DNS_RESOLVER: 127.0.0.11
     volumes:
       - ./gateway/kong.yml:/etc/kong/kong.yml
@@ -77,8 +79,6 @@ services:
       auth-service:
         condition: service_healthy
       game-service:
-        condition: service_healthy
-      quiz-service:
         condition: service_healthy
       timer-service:
         condition: service_healthy
@@ -99,6 +99,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 3
+      rag-service:
+        condition: service_healthy
 
   # --- Core Services ---
   # The internal microservices that handle the actual business logic.
@@ -108,11 +110,11 @@ services:
       dockerfile: services/auth-service/Dockerfile
     environment:
       SERVICE_NAME: auth-service
-      PORT: 3001
-      KAFKA_BROKERS: kafka:9092
-      REDIS_URL: redis://redis:6379
-      PG_CONNECTION_STRING: postgresql://focuspulse:changeme_pg@postgres:5432/focuspulse
-      JWT_SECRET: changeme_jwt_secret_min_32_chars!!
+      PORT: ${AUTH_SERVICE_PORT}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      REDIS_URL: ${REDIS_URL}
+      PG_CONNECTION_STRING: ${PG_CONNECTION_STRING}
+      JWT_SECRET: ${JWT_SECRET}
       NODE_ENV: production
     depends_on:
       postgres:
@@ -122,7 +124,7 @@ services:
       kafka:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${AUTH_SERVICE_PORT}/healthz || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 3
@@ -134,38 +136,21 @@ services:
       dockerfile: services/game-service/Dockerfile
     environment:
       SERVICE_NAME: game-service
-      PORT: 3002
-      KAFKA_BROKERS: kafka:9092
-      REDIS_URL: redis://redis:6379
-      PG_CONNECTION_STRING: postgresql://focuspulse:changeme_pg@postgres:5432/focuspulse
-      JWT_SECRET: changeme_jwt_secret_min_32_chars!!
+      PORT: ${GAME_SERVICE_PORT}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      REDIS_URL: ${REDIS_URL}
+      PG_CONNECTION_STRING: ${PG_CONNECTION_STRING}
+      JWT_SECRET: ${JWT_SECRET}
       NODE_ENV: production
     depends_on:
       kafka:
+        condition: service_health
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3002/healthz || exit 1"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
-
-  quiz-service:
-    build:
-      context: .
-      dockerfile: services/quiz-service/Dockerfile
-    environment:
-      SERVICE_NAME: quiz-service
-      PORT: 3003
-      KAFKA_BROKERS: kafka:9092
-      REDIS_URL: redis://redis:6379
-      PG_CONNECTION_STRING: postgresql://focuspulse:changeme_pg@postgres:5432/focuspulse
-      JWT_SECRET: changeme_jwt_secret_min_32_chars!!
-      NODE_ENV: production
-    depends_on:
-      kafka:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3003/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${GAME_SERVICE_PORT}/healthz || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 3
@@ -176,20 +161,43 @@ services:
       dockerfile: services/timer-service/Dockerfile
     environment:
       SERVICE_NAME: timer-service
-      PORT: 3004
-      KAFKA_BROKERS: kafka:9092
-      REDIS_URL: redis://redis:6379
-      PG_CONNECTION_STRING: postgresql://focuspulse:changeme_pg@postgres:5432/focuspulse
-      JWT_SECRET: changeme_jwt_secret_min_32_chars!!
+      PORT: ${TIMER_SERVICE_PORT}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      REDIS_URL: ${REDIS_URL}
+      PG_CONNECTION_STRING: ${PG_CONNECTION_STRING}
+      JWT_SECRET: ${JWT_SECRET}
       NODE_ENV: production
     depends_on:
       kafka:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3004/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${TIMER_SERVICE_PORT}/healthz || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 3
+
+  rag-service:
+    build:
+      context: .
+      dockerfile: services/rag-service/Dockerfile
+    environment:
+      POSTGRES_URL: ${POSTGRES_URL}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      GEMINI_LLM_MODEL: ${GEMINI_LLM_MODEL:-gemini-2.0-flash}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-768}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      PORT: ${RAG_SERVICE_PORT}
+ 
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
 
   bff:
     build:
@@ -197,20 +205,21 @@ services:
       dockerfile: bff/Dockerfile
     environment:
       SERVICE_NAME: bff
-      PORT: 3010
-      AUTH_SERVICE_URL: http://auth-service:3001
-      GAME_SERVICE_URL: http://game-service:3002
-      QUIZ_SERVICE_URL: http://quiz-service:3003
-      TIMER_SERVICE_URL: http://timer-service:3004
-      KAFKA_BROKERS: kafka:9092
-      REDIS_URL: redis://redis:6379
-      PG_CONNECTION_STRING: postgresql://focuspulse:changeme_pg@postgres:5432/focuspulse
-      JWT_SECRET: changeme_jwt_secret_min_32_chars!!
+      PORT: ${BFF_PORT}
+      AUTH_SERVICE_URL: http://auth-service:${AUTH_SERVICE_PORT}
+      GAME_SERVICE_URL: http://game-service:${GAME_SERVICE_PORT}
+#      QUIZ_SERVICE_URL: http://quiz-service:${QUIZ_SERVICE_PORT}
+      TIMER_SERVICE_URL: http://timer-service:${TIMER_SERVICE_PORT}
+      RAG_SERVICE_URL: http://rag-service:${RAG_SERVICE_PORT}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      REDIS_URL: ${REDIS_URL}
+      PG_CONNECTION_STRING: ${PG_CONNECTION_STRING}
+      JWT_SECRET: ${JWT_SECRET}
       NODE_ENV: production
     ports:
-      - "3010:3010"
+      - "${BFF_PORT}:${BFF_PORT}"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3010/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:${BFF_PORT}/healthz || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 3
@@ -223,10 +232,10 @@ services:
       dockerfile: consumers/leaderboard/Dockerfile
     environment:
       SERVICE_NAME: leaderboard-consumer
-      KAFKA_BROKERS: kafka:9092
-      REDIS_URL: redis://redis:6379
-      PG_CONNECTION_STRING: postgresql://focuspulse:changeme_pg@postgres:5432/focuspulse
-      JWT_SECRET: changeme_jwt_secret_min_32_chars!!
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      REDIS_URL: ${REDIS_URL}
+      PG_CONNECTION_STRING: ${PG_CONNECTION_STRING}
+      JWT_SECRET: ${JWT_SECRET}
     depends_on:
       kafka:
         condition: service_healthy

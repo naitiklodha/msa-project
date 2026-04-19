@@ -51,6 +51,9 @@ async function bootstrap() {
   app.post('/login', async (req, res, next) => {
     try {
       const { email, password } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'Email and password are required' } });
+      }
       const result = await service.login(email, password);
       res.json(result);
     } catch (err) {
@@ -61,6 +64,12 @@ async function bootstrap() {
   app.post('/register', async (req, res, next) => {
     try {
       const { email, password, role } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'Email and password are required' } });
+      }
+      if (password.length < 6) {
+        return res.status(400).json({ error: { code: 'BAD_REQUEST', message: 'Password must be at least 6 characters' } });
+      }
       const result = await service.register(email, password, role);
       res.status(201).json(result);
     } catch (err) {

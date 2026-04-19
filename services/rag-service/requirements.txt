@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+psycopg[binary]
+python-dotenv
+python-multipart
+google-genai
+pypdf
+python-docx
+python-pptx
+redis
