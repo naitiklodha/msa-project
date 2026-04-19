@@ -17,7 +17,6 @@ for svc in "${services[@]}"; do
     echo "✅ $svc-service is HEALTHY"
   else
     echo "❌ $svc-service is UNHEALTHY ($status)"
-    # We don't exit here to see if other services are up
   fi
 done
 
