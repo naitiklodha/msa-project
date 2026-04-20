@@ -1,6 +1,39 @@
 _format_version: "3.0"
 _transform: true
 
+plugins:
+  - name: cors
+    config:
+      origins:
+        - "*"
+      methods:
+        - GET
+        - POST
+        - PUT
+        - PATCH
+        - DELETE
+        - OPTIONS
+      headers:
+        - Accept
+        - Accept-Version
+        - Content-Length
+        - Content-MD5
+        - Content-Type
+        - Date
+        - Authorization
+      exposed_headers:
+        - Authorization
+      credentials: true
+      max_age: 3600
+  - name: rate-limiting
+    config:
+      second: 200
+      minute: 5000
+      policy: redis
+      redis_host: redis
+      redis_port: 6379
+    redis_timeout: 2000
+
 services:
   - name: auth-service
     url: http://auth-service:3001
@@ -59,6 +92,13 @@ services:
               secret_is_base64: false
               run_on_preflight: true
 
+  - name: frontend
+    url: http://frontend:80
+    routes:
+      - name: frontend-route
+        paths:
+          - /
+
   - name: bff
     url: http://bff:3010
     routes:
@@ -66,9 +106,42 @@ services:
         paths:
           - /api/healthz
           - /api/metrics
+      - name: bff-ws
+        paths:
+          - /socket.io
+        protocols:
+          - http
+          - https
       - name: bff-protected
         paths:
           - /api
+        plugins:
+          - name: jwt
+            config:
+              secret_is_base64: false
+              run_on_preflight: true
+
+  - name: leaderboard-service
+    url: http://leaderboard-service:3005
+    routes:
+      - name: leaderboard-ws
+        paths:
+          - /ws/leaderboard
+        protocols:
+          - http
+          - https
+        plugins:
+          - name: jwt
+            config:
+              secret_is_base64: false
+              run_on_preflight: true
+
+  - name: notification-svc
+    url: http://notification-svc:3007
+    routes:
+      - name: notification-protected
+        paths:
+          - /notifications
         plugins:
           - name: jwt
             config:
