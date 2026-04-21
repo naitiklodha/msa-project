@@ -18,3 +18,9 @@ app = FastAPI(title="RAG Service", version="1.0.0", lifespan=lifespan)
 app.include_router(health_router)
 app.include_router(documents_router)
 app.include_router(query_router)
+
+@app.get("/diagnostics")
+def diagnostics():
+    from .rag_service import get_diagnostics
+    return get_diagnostics()
+

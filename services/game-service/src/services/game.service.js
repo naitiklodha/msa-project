@@ -66,6 +66,38 @@ function gameService({ pgPool, redis, produce }) {
     return { score };
   };
 
+  // Award points for completing a micro game
+  const scoreMiniGame = async (userId, gameName, rawScore) => {
+    let score = 0;
+    
+    // Scaling points down so you don't inflate the global leaderboard instantly
+    if (gameName === '2048') {
+      score = Math.floor(rawScore / 100); 
+    } else if (gameName === 'snake') {
+      score = Math.floor(rawScore / 5);
+    } else {
+      score = 5; // Flat score for unknown games
+    }
+
+    if (score > 0) {
+      await pgPool.query(
+        `INSERT INTO game_scores (user_id, score, streak, source) VALUES ($1, $2, 0, $3)`,
+        [userId, score, `minigame_${gameName}`]
+      );
+
+      await produce('game-events', 'GAME_SCORED', {
+        userId,
+        score,
+        streak: 0,
+        source: `minigame_${gameName}`,
+      });
+
+      logger.info({ msg: 'Mini game scored', userId, gameName, rawScore, awardedScore: score });
+    }
+
+    return { score };
+  };
+
   // Figure out how many consecutive days the user has completed at least one session
   const calculateStreak = async (userId) => {
     const result = await pgPool.query(
@@ -132,7 +164,7 @@ function gameService({ pgPool, redis, produce }) {
     };
   };
 
-  return { scoreFocusSession, scoreQuiz, getUserStats, calculateStreak };
+  return { scoreFocusSession, scoreQuiz, scoreMiniGame, getUserStats, calculateStreak };
 }
 
 module.exports = gameService;

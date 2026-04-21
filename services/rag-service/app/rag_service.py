@@ -6,9 +6,9 @@ import hashlib
 from typing import Any, Generator
 
 from fastapi import HTTPException
-from google import genai
+from openai import OpenAI
 
-from .config import GOOGLE_API_KEY, LLM_MODEL
+from .config import OPENAI_API_KEY, LLM_MODEL
 from .db import get_connection
 from .embedding import embed_document, embed_query, to_pgvector
 from .chunking import chunk_text
@@ -24,13 +24,14 @@ from .cache import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-llm_client = genai.Client(api_key=GOOGLE_API_KEY)
+llm_client = OpenAI(api_key=OPENAI_API_KEY)
 
 
 def link_user_to_document(user_id: str, document_id: str) -> None:
+    logger.info(f"Linking user {user_id} to document {document_id}")
     sql = """
     INSERT INTO user_documents (user_id, document_id)
-    VALUES (%s, %s)
+    VALUES (%s::uuid, %s::uuid)
     ON CONFLICT DO NOTHING;
     """
     with get_connection() as conn:
@@ -39,14 +40,32 @@ def link_user_to_document(user_id: str, document_id: str) -> None:
         conn.commit()
 
 
-def process_upload(file_bytes: bytes, file_name: str, extracted_text: str, user_id: str) -> dict[str, Any]:
+def link_room_to_document(room_id: str, document_id: str) -> None:
+    logger.info(f"Linking room {room_id} to document {document_id}")
+    sql = """
+    INSERT INTO room_documents (room_id, document_id)
+    VALUES (%s::uuid, %s::uuid)
+    ON CONFLICT DO NOTHING;
+    """
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(sql, (room_id, document_id))
+        conn.commit()
+
+
+
+def process_upload(file_bytes: bytes, file_name: str, extracted_text: str, user_id: str, room_id: str = None) -> dict[str, Any]:
     doc_hash = hashlib.sha256(file_bytes).hexdigest()
     
     # L1: Check Redis
     cached_doc_id = get_cached_document_id(doc_hash)
     if cached_doc_id:
         logger.info(f"Redis cache hit for doc hash: {doc_hash}")
-        link_user_to_document(user_id, cached_doc_id)
+        if room_id:
+            link_room_to_document(room_id, cached_doc_id)
+        else:
+            link_user_to_document(user_id, cached_doc_id)
+            
         topics = get_topics_from_cache(cached_doc_id)
         return {
             "document_id": cached_doc_id,
@@ -62,9 +81,13 @@ def process_upload(file_bytes: bytes, file_name: str, extracted_text: str, user_
             row = cur.fetchone()
             if row:
                 doc_id = str(row[0])
-                logger.info(f"Postgres cache hit for doc hash: {doc_hash}")
+                logger.info(f"Postgres cache hit for doc hash: {doc_hash} -> doc_id: {doc_id}")
                 set_cached_document_id(doc_hash, doc_id)
-                link_user_to_document(user_id, doc_id)
+                if room_id:
+                    link_room_to_document(room_id, doc_id)
+                else:
+                    link_user_to_document(user_id, doc_id)
+                    
                 topics = get_topics_from_cache(doc_id)
                 return {
                     "document_id": doc_id,
@@ -72,6 +95,7 @@ def process_upload(file_bytes: bytes, file_name: str, extracted_text: str, user_
                     "file_name": file_name,
                     "topics": topics
                 }
+
 
     # Miss: Run Full RAG Pipeline
     logger.info(f"Cache miss for doc hash: {doc_hash}. Running full pipeline.")
@@ -90,6 +114,16 @@ def process_upload(file_bytes: bytes, file_name: str, extracted_text: str, user_
             
             # 3. Process each part/topic
             parts = topic_division.get("parts", [])
+            
+            # FALLBACK: If LLM failed to divide into topics, create one default topic
+            if not parts:
+                logger.info("Triggering fallback topic: General Overview")
+                parts = [{
+                    "title": "General Overview",
+                    "time_minutes": 25,
+                    "outline": extracted_text[:5000] # Use the start as chunk content
+                }]
+
             for i, part in enumerate(parts):
                 topic_title = part.get("title", f"Part {i+1}")
                 time_est_s = part.get("time_minutes", 25) * 60
@@ -111,8 +145,7 @@ def process_upload(file_bytes: bytes, file_name: str, extracted_text: str, user_
                     )
                     chunk_id = str(cur.fetchone()[0])
                     
-                    # Generate questions for this chunk (if it's substantial)
-                    # We generate questions based on the chunk_text_val
+                    # Generate questions for this chunk
                     questions = generate_questions(chunk_text_val, topic_title)
                     for q in questions:
                         cur.execute(
@@ -127,11 +160,17 @@ def process_upload(file_bytes: bytes, file_name: str, extracted_text: str, user_
                                 q.get("difficulty", "medium")
                             )
                         )
+                    
+                    # STAGGER: Wait slightly between chunks to avoid rate limiting
+                    time.sleep(1.5)
         conn.commit()
 
-    # Backfill Cache & Link User
+    # Backfill Cache & Link
     set_cached_document_id(doc_hash, doc_id)
-    link_user_to_document(user_id, doc_id)
+    if room_id:
+        link_room_to_document(room_id, doc_id)
+    else:
+        link_user_to_document(user_id, doc_id)
     topics = get_topics_from_cache(doc_id)
     
     return {
@@ -140,6 +179,48 @@ def process_upload(file_bytes: bytes, file_name: str, extracted_text: str, user_
         "file_name": file_name,
         "topics": topics
     }
+
+
+def delete_document(doc_id: str, user_id: str) -> None:
+    """Deletes a document and its associated chunks/questions/cache."""
+    logger.info(f"User {user_id} requested deletion of document {doc_id}")
+    
+    # 1. Fetch document info (hash) before deleting for cache clearing
+    doc_hash = None
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT hash FROM documents WHERE id = %s", (doc_id,))
+            row = cur.fetchone()
+            if row:
+                doc_hash = row[0]
+            
+            # 2. Verify ownership (via link table)
+            cur.execute("SELECT 1 FROM user_documents WHERE user_id = %s::uuid AND document_id = %s::uuid", (user_id, doc_id))
+            if not cur.fetchone():
+                # Check room documents as fallback if user has rights
+                cur.execute("SELECT 1 FROM room_documents WHERE document_id = %s::uuid", (doc_id,))
+                if not cur.fetchone():
+                    logger.warning(f"Unauthorized deletion attempt by {user_id} for doc {doc_id}")
+                    raise HTTPException(status_code=403, detail="Not authorized to delete this document.")
+
+            # 3. Delete from DB (CASCADES will handle chunks/questions)
+            cur.execute("DELETE FROM documents WHERE id = %s", (doc_id,))
+            conn.commit()
+
+    # 4. Clear Cache
+    from .cache import redis_client
+    if redis_client:
+        try:
+            if doc_hash:
+                redis_client.delete(f"doc:hash:{doc_hash}")
+            redis_client.delete(f"doc:{doc_id}:topics")
+            # Clear all question caches for this doc (wildcard)
+            keys = redis_client.keys(f"doc:{doc_id}:questions:*")
+            if keys:
+                redis_client.delete(*keys)
+            logger.info(f"Cleared cache for document {doc_id}")
+        except Exception as e:
+            logger.error(f"Failed to clear cache for {doc_id}: {e}")
 
 
 def get_topics_from_cache(doc_id: str) -> list[dict[str, Any]]:
@@ -172,16 +253,79 @@ def get_topics_from_cache(doc_id: str) -> list[dict[str, Any]]:
                 "time_est_s": row[2]
             })
 
-    set_cached_topics(doc_id, {"topics": topics})
+    set_cached_topics(doc_id, topics)
     return topics
 
 
+def get_questions_from_db(doc_id: str, chunk_id: str) -> list[dict[str, Any]]:
+    """Fetches questions from Postgres and re-populates cache if missing."""
+    cached = get_cached_questions(doc_id, chunk_id)
+    if cached:
+        return cached
+
+    # Fetch from Postgres
+    questions = []
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, question, options, answer, difficulty 
+                FROM questions
+                WHERE document_id = %s::uuid AND chunk_id = %s::uuid
+            """, (doc_id, chunk_id))
+            rows = cur.fetchall()
+            for row in rows:
+                questions.append({
+                    "id": str(row[0]),
+                    "question": row[1],
+                    "options": row[2] if isinstance(row[2], list) else json.loads(row[2]) if row[2] else [],
+                    "answer": row[3],
+                    "difficulty": row[4]
+                })
+
+            # FALLBACK: If no questions found in DB, generate them now!
+            if not questions:
+                logger.info(f"Questions missing for chunk {chunk_id}. Generating on-demand...")
+                cur.execute("SELECT content, topic FROM document_chunks WHERE id = %s::uuid", (chunk_id,))
+                chunk_row = cur.fetchone()
+                if chunk_row:
+                    content, topic = chunk_row
+                    new_questions = generate_questions(content, topic)
+                    for q in new_questions:
+                        cur.execute(
+                            """
+                            INSERT INTO questions (document_id, chunk_id, question, options, answer, difficulty)
+                            VALUES (%s, %s, %s, %s::jsonb, %s, %s) RETURNING id;
+                            """,
+                            (
+                                doc_id, chunk_id, q.get("question"),
+                                json.dumps(q.get("options", [])),
+                                q.get("options")[q.get("correct_index", 0)] if q.get("options") else "",
+                                q.get("difficulty", "medium")
+                            )
+                        )
+                        q_id = str(cur.fetchone()[0])
+                        questions.append({
+                            "id": q_id,
+                            "question": q.get("question"),
+                            "options": q.get("options", []),
+                            "answer": q.get("options")[q.get("correct_index", 0)] if q.get("options") else "",
+                            "difficulty": q.get("difficulty", "medium")
+                        })
+                    conn.commit()
+
+    if questions:
+        set_cached_questions(doc_id, chunk_id, questions)
+    
+    return questions
+
+
 def list_user_documents(user_id: str) -> dict[str, Any]:
+    logger.info(f"Listing documents for user: {user_id}")
     sql = """
     SELECT d.id, d.file_name, d.content_length, d.created_at
     FROM documents d
     JOIN user_documents ud ON d.id = ud.document_id
-    WHERE ud.user_id = %s
+    WHERE ud.user_id = %s::uuid
     ORDER BY d.created_at DESC;
     """
     docs = []
@@ -196,23 +340,96 @@ def list_user_documents(user_id: str) -> dict[str, Any]:
                     "content_length": row[2],
                     "created_at": row[3].isoformat() if row[3] else None
                 })
+    logger.info(f"Found {len(docs)} documents for user {user_id}")
     return {"count": len(docs), "documents": docs}
 
 
-def query_documents(query: str, top_k: int, user_id: str) -> dict[str, Any]:
-    query_embedding = embed_query(query)
-    retrieve_sql = """
-    SELECT dc.id, dc.topic, dc.content, 1 - (dc.embedding <=> %s::vector) AS similarity
-    FROM document_chunks dc
-    JOIN user_documents ud ON ud.document_id = dc.document_id
-    WHERE ud.user_id = %s
-    ORDER BY dc.embedding <=> %s::vector
-    LIMIT %s;
+def list_room_documents(room_id: str) -> dict[str, Any]:
+    logger.info(f"Listing documents for room: {room_id}")
+    sql = """
+    SELECT d.id, d.file_name, d.content_length, d.created_at
+    FROM documents d
+    JOIN room_documents rd ON d.id = rd.document_id
+    WHERE rd.room_id = %s::uuid
+    ORDER BY d.created_at DESC;
     """
+    docs = []
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(retrieve_sql, (to_pgvector(query_embedding), to_pgvector(query_embedding), user_id, top_k))
+            cur.execute(sql, (room_id,))
             rows = cur.fetchall()
+            for row in rows:
+                docs.append({
+                    "id": str(row[0]),
+                    "file_name": row[1],
+                    "content_length": row[2],
+                    "created_at": row[3].isoformat() if row[3] else None
+                })
+    return {"count": len(docs), "documents": docs}
+
+
+def get_diagnostics() -> dict[str, Any]:
+    """Returns raw counts and system info for troubleshooting."""
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM documents")
+            total_docs = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM user_documents")
+            total_links = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM document_chunks")
+            total_chunks = cur.fetchone()[0]
+            
+            # Count documents that have NO chunks
+            cur.execute("""
+                SELECT COUNT(*) FROM documents d 
+                LEFT JOIN document_chunks dc ON d.id = dc.document_id 
+                WHERE dc.id IS NULL
+            """)
+            orphaned_docs = cur.fetchone()[0]
+            
+    return {
+        "status": "active",
+        "database": "local-postgres",
+        "counts": {
+            "documents": total_docs,
+            "user_documents": total_links,
+            "document_chunks": total_chunks,
+            "orphaned_documents": orphaned_docs
+        }
+    }
+
+
+
+def query_documents(query: str, top_k: int, user_id: str, room_id: str = None) -> dict[str, Any]:
+    logger.info(f"Querying documents: {query} (user: {user_id}, room: {room_id})")
+    query_embedding = embed_query(query)
+    
+    if room_id:
+        retrieve_sql = """
+        SELECT dc.id, dc.topic, dc.content, 1 - (dc.embedding <=> %s::vector) AS similarity
+        FROM document_chunks dc
+        JOIN room_documents rd ON rd.document_id = dc.document_id
+        WHERE rd.room_id = %s
+        ORDER BY dc.embedding <=> %s::vector
+        LIMIT %s;
+        """
+        params = (to_pgvector(query_embedding), room_id, to_pgvector(query_embedding), top_k)
+    else:
+        retrieve_sql = """
+        SELECT dc.id, dc.topic, dc.content, 1 - (dc.embedding <=> %s::vector) AS similarity
+        FROM document_chunks dc
+        JOIN user_documents ud ON ud.document_id = dc.document_id
+        WHERE ud.user_id = %s
+        ORDER BY dc.embedding <=> %s::vector
+        LIMIT %s;
+        """
+        params = (to_pgvector(query_embedding), user_id, to_pgvector(query_embedding), top_k)
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(retrieve_sql, params)
+            rows = cur.fetchall()
+
 
     contexts = []
     docs = []
@@ -225,23 +442,24 @@ def query_documents(query: str, top_k: int, user_id: str) -> dict[str, Any]:
         })
         contexts.append(f"TOPIC: {row[1]}\nCONTENT: {row[2]}")
 
+    print(docs)
+    print(contexts)
     prompt = (
         "You are a helpful RAG assistant. Use only the context below to answer.\n"
         "If the answer is not in context, clearly say you do not know.\n\n"
         f"QUESTION:\n{query}\n\n"
         f"CONTEXT:\n{chr(10).join(contexts) if contexts else 'No context found.'}"
     )
-    llm_models = [LLM_MODEL, "models/gemini-2.5-pro", "models/gemini-2.5-flash"]
-
     llm_response = None
-    for model_name in llm_models:
-        try:
-            llm_response = llm_client.models.generate_content(model=model_name, contents=prompt)
-            break
-        except Exception:
-            pass
-
-    answer = llm_response.text if llm_response and hasattr(llm_response, "text") else "Failed to generate answer."
+    try:
+        completion = llm_client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        answer = completion.choices[0].message.content
+    except Exception as e:
+        logger.error(f"OpenAI Query Error: {str(e)}")
+        answer = "Failed to generate answer."
 
     return {
         "query": query,
@@ -291,17 +509,17 @@ def stream_query_documents(query: str, top_k: int, user_id: str) -> Generator[st
         f"QUESTION:\n{query}\n\n"
         f"CONTEXT:\n{chr(10).join(contexts) if contexts else 'No context found.'}"
     )
-    llm_models = [LLM_MODEL, "models/gemini-2.5-pro", "models/gemini-2.5-flash"]
-
-    for model_name in llm_models:
-        try:
-            llm_response_stream = llm_client.models.generate_content_stream(model=model_name, contents=prompt)
-            for chunk in llm_response_stream:
-                if chunk.text:
-                    yield json.dumps({"type": "chunk", "content": chunk.text}) + "\n"
-            break
-        except Exception:
-            pass
+    try:
+        response = llm_client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            stream=True
+        )
+        for chunk in response:
+            if chunk.choices[0].delta.content:
+                yield json.dumps({"type": "chunk", "content": chunk.choices[0].delta.content}) + "\n"
+    except Exception as e:
+        logger.error(f"OpenAI Stream Error: {str(e)}")
 
 
 # ---------------------------------------------------------
@@ -324,63 +542,50 @@ def generate_questions(part_content: str, part_title: str) -> list[dict[str, Any
         "]\n\n"
         f"CONTENT:\n{part_content}"
     )
-    llm_models = [LLM_MODEL, "models/gemini-2.5-pro", "models/gemini-2.5-flash"]
-
-    llm_response = None
-    for model_name in llm_models:
-        try:
-            llm_response = llm_client.models.generate_content(model=model_name, contents=prompt)
-            break
-        except Exception:
-            pass
-
-    if llm_response is None:
-        return []
-
-    response_text = llm_response.text if hasattr(llm_response, "text") else ""
-    json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
-    json_str = json_match.group(1) if json_match else response_text
-    
     try:
-        return json.loads(json_str)
-    except json.JSONDecodeError:
+        completion = llm_client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"}
+        )
+        response_text = completion.choices[0].message.content
+        print(json.loads(response_text).get("questions", json.loads(response_text)))
+        return json.loads(response_text).get("questions", json.loads(response_text))
+    except Exception as e:
+        logger.error(f"OpenAI generate_questions error: {str(e)}")
         return []
 
 
 def summarize_text(text: str) -> dict[str, Any]:
+    """Divides document into topics using LLM. Returns standard JSON schema."""
     prompt = (
         "Analyze the following document and divide it into study topics. Each topic should be designed to take no more than 25 minutes to study. Assign an estimated study time in minutes to each topic (maximum 25 minutes per topic). Provide a title for each topic, and an outline of everything that comes in that part including all the keywords.\n\n"
-        "Output in JSON format only:\n\n"
+        "IMPORTANT: You MUST respond ONLY with a valid JSON object. Do not include preamble or markdown blocks if possible, but if you do, wrap it in ```json blocks.\n\n"
+        "JSON SCHEMA:\n"
         "{\n"
-        '"number_of_parts": <int>,\n'
-        '"parts": [\n'
-        '{\n'
-        '"title": "<string>",\n'
-        '"time_minutes": <int>,\n'
-        '"outline": "<string with keywords and outline>"\n'
-        '}\n'
-        ']\n'
+        '  "number_of_parts": <int>,\n'
+        '  "parts": [\n'
+        "    {\n"
+        '      "title": "Topic Name",\n'
+        '      "time_minutes": 20,\n'
+        '      "outline": "Summary of content..." \n'
+        "    }\n"
+        "  ]\n"
         "}\n\n"
-        f"DOCUMENT:\n{text[:20000]}"
+        f"DOCUMENT:\n{text[:25000]}"
     )
-    llm_models = [LLM_MODEL, "models/gemini-2.5-pro", "models/gemini-2.5-flash"]
-
-    llm_response = None
-    for model_name in llm_models:
-        try:
-            llm_response = llm_client.models.generate_content(model=model_name, contents=prompt)
-            break
-        except Exception:
-            pass
-
-    if llm_response is None:
-        return {"number_of_parts": 0, "parts": []}
-
-    response_text = llm_response.text if hasattr(llm_response, "text") else ""
-    json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
-    json_str = json_match.group(1) if json_match else response_text
-    
     try:
-        return json.loads(json_str)
-    except json.JSONDecodeError:
+        logger.info(f"Summarizing with {LLM_MODEL}...")
+        completion = llm_client.chat.completions.create(
+            model=LLM_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"}
+        )
+        response_text = completion.choices[0].message.content
+        data = json.loads(response_text)
+        if "parts" not in data or not data["parts"]:
+            return {"number_of_parts": 0, "parts": []}
+        return data
+    except Exception as e:
+        logger.error(f"OpenAI summarize_text error: {str(e)}")
         return {"number_of_parts": 0, "parts": []}

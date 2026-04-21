@@ -12,11 +12,12 @@ router = APIRouter(prefix="/query", tags=["query"])
 
 @router.post("")
 def query_data(payload: QueryRequest, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
-    return query_documents(query=payload.query, top_k=payload.top_k, user_id=user_id)
+    return query_documents(query=payload.query, top_k=payload.top_k, user_id=user_id, room_id=payload.room_id)
 
 
 @router.post("/stream")
 def query_data_stream(payload: QueryRequest, user_id: str = Depends(get_current_user)):
+    print("I am streaming")
     return StreamingResponse(
         stream_query_documents(query=payload.query, top_k=payload.top_k, user_id=user_id),
         media_type="application/x-ndjson"

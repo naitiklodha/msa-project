@@ -58,24 +58,62 @@ async function createProducer(kafka, serviceName) {
  * and we'll take care of the connection and subscription boilerplate.
  */
 async function createConsumer(kafka, serviceName, topics, handler) {
-  const consumer = kafka.consumer({
-    groupId: `focuspulse-${serviceName}-cg`,
-    sessionTimeout: 30000,
-    heartbeatInterval: 3000,
-    maxBytesPerPartition: 1048576,
-  });
+  const MAX_RETRIES = 10;
+  const BASE_DELAY = 3000; // 3 seconds
 
-  await consumer.connect();
-  await consumer.subscribe({ topics, fromBeginning: false });
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      // Ensure topics exist before subscribing — idempotent approach 
+      // to silence harmless 'Topic creation errors' in logs.
+      const admin = kafka.admin();
+      await admin.connect();
+      try {
+        const existingTopics = await admin.listTopics();
+        const missingTopics = topics.filter(t => !existingTopics.includes(t));
+        
+        if (missingTopics.length > 0) {
+          await admin.createTopics({
+            waitForLeaders: true,
+            topics: missingTopics.map(t => ({ topic: t, numPartitions: 1, replicationFactor: 1 })),
+          });
+          logger.info({ msg: 'Created missing Kafka topics', service: serviceName, missingTopics });
+        }
+      } catch (err) {
+        logger.warn({ msg: 'Optional topic creation failed', detail: err.message });
+      } finally {
+        await admin.disconnect();
+      }
 
-  await consumer.run({
-    eachMessage: async ({ topic, partition, message }) => {
-      await handler({ topic, partition, message });
-    },
-  });
+      const consumer = kafka.consumer({
+        groupId: `focuspulse-${serviceName}-cg`,
+        sessionTimeout: 30000,
+        heartbeatInterval: 3000,
+        maxBytesPerPartition: 1048576,
+      });
 
-  logger.info({ msg: 'Kafka consumer running', service: serviceName, topics });
-  return consumer;
+      await consumer.connect();
+      await consumer.subscribe({ topics, fromBeginning: true });
+
+      await consumer.run({
+        eachMessage: async ({ topic, partition, message }) => {
+          await handler({ topic, partition, message });
+        },
+      });
+
+      logger.info({ msg: 'Kafka consumer running', service: serviceName, topics });
+      return consumer;
+    } catch (err) {
+      logger.warn({
+        msg: `Kafka consumer setup failed (attempt ${attempt}/${MAX_RETRIES})`,
+        service: serviceName,
+        error: err.message,
+      });
+      if (attempt === MAX_RETRIES) throw err;
+      const delay = BASE_DELAY * attempt;
+      logger.info({ msg: `Retrying in ${delay}ms...` });
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
 }
 
 module.exports = { createKafkaClient, createProducer, createConsumer };

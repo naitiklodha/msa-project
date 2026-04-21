@@ -4,6 +4,7 @@ psycopg[binary]
 python-dotenv
 python-multipart
 google-genai
+openai
 pypdf
 python-docx
 python-pptx

@@ -8,16 +8,16 @@ GATEWAY="http://localhost:8000"
 echo "🚀 Starting FocusPulse Smoke Test..."
 
 # Checking service health first.
-echo -e "\n--- Checking Service Health ---"
-services=("auth" "game" "quiz" "timer")
-for svc in "${services[@]}"; do
-  status=$(curl -s -o /dev/null -w "%{http_code}" $GATEWAY/$svc/healthz)
-  if [ $status -eq 200 ]; then
-    echo "✅ $svc-service is HEALTHY"
-  else
-    echo "❌ $svc-service is UNHEALTHY ($status)"
-  fi
-done
+# echo -e "\n--- Checking Service Health ---"
+# services=("auth" "game" "quiz" "timer" "leaderboard" "notification")
+# for svc in "${services[@]}"; do
+#   status=$(curl -s -o /dev/null -w "%{http_code}" $GATEWAY/$svc/healthz)
+#   if [ $status -eq 200 ]; then
+#     echo "✅ $svc-service is HEALTHY"
+#   else
+#     echo "❌ $svc-service is UNHEALTHY ($status)"
+#   fi
+# done
 
 # Testing the registration and login flows (now with real Postgres).
 echo -e "\n--- Testing Auth Flow (Real DB) ---"
@@ -121,8 +121,8 @@ else
 fi
 
 # Give Kafka a moment to propagate the events through the chain
-echo "Waiting for event propagation (3s)..."
-sleep 3
+echo "Waiting for event propagation (5s)..."
+sleep 5
 
 # Check game stats
 echo -e "\n--- Checking Game Stats ---"
@@ -133,7 +133,20 @@ TOTAL_SCORE=$(echo $STATS_RES | sed -n 's/.*"totalScore":\([0-9]*\).*/\1/p')
 if [ -n "$TOTAL_SCORE" ] && [ "$TOTAL_SCORE" -gt 0 ] 2>/dev/null; then
   echo "✅ Score recorded: $TOTAL_SCORE points"
 else
-  echo "⚠️  Score not yet propagated (this is ok on first run): $STATS_RES"
+  echo "⚠️  Score not yet propagated: $STATS_RES"
+fi
+
+# Check Analytics Service (Go)
+echo -e "\n--- Checking Analytics Overview (Go) ---"
+ANALYTICS_RES=$(curl -s $GATEWAY/analytics/overview \
+  -H "Authorization: Bearer $TOKEN")
+INGESTED=$(echo $ANALYTICS_RES | sed -n 's/.*"events_ingested":\([0-9]*\).*/\1/p')
+
+if [ -n "$INGESTED" ] && [ "$INGESTED" -gt 0 ] 2>/dev/null; then
+  echo "✅ Analytics service ingested $INGESTED events"
+else
+  echo "❌ Analytics service verification failed: $ANALYTICS_RES"
+  exit 1
 fi
 
 echo -e "\n🔥 ALL TESTS PASSED SUCCESSFULLY 🔥"

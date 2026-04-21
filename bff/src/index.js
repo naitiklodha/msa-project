@@ -36,18 +36,31 @@ app.get('/api/dashboard', async (req, res, next) => {
         }
     };
 
-    const [authRes, gameRes, timerRes] = await Promise.all([
+    const [authRes, gameRes, timerRes, ragRes, leaderboardRes, analyticsRes] = await Promise.all([
       fetchData(`${process.env.AUTH_SERVICE_URL || 'http://auth-service:3001'}/healthz`),
-      fetchData(`${process.env.GAME_SERVICE_URL || 'http://game-service:3002'}/game/healthz`),
-      fetchData(`${process.env.TIMER_SERVICE_URL || 'http://timer-service:3004'}/timer/healthz`)
+      fetchData(`${process.env.GAME_SERVICE_URL || 'http://game-service:3002'}/healthz`),
+      fetchData(`${process.env.TIMER_SERVICE_URL || 'http://timer-service:3004'}/healthz`),
+      fetchData(`${process.env.RAG_SERVICE_URL || 'http://rag-service:8080'}/healthz`),
+      fetchData(`${process.env.LEADERBOARD_SERVICE_URL || 'http://leaderboard-service:3005'}/healthz`),
+      fetchData(`${process.env.ANALYTICS_SERVICE_URL || 'http://analytics-service:4000'}/overview`)
     ]);
 
-    // Constructing mock stats based on health for demonstration.
-    // In a real scenario, this would query actual `GET /stats` endpoints
+    // Constructing actual stats from the Go analytics service data
     res.json({
-        users: { count: authRes.status === 'ok' ? Math.floor(Math.random() * 100) + 12 : 0, status: authRes.status },
-        games: { active: gameRes.status === 'ok' ? Math.floor(Math.random() * 20) + 3 : 0, status: gameRes.status },
-        timer: { active: timerRes.status === 'ok' ? Math.floor(Math.random() * 50) + 10 : 0, status: timerRes.status }
+        services: {
+            auth: authRes.status,
+            game: gameRes.status,
+            timer: timerRes.status,
+            rag: ragRes.status,
+            leaderboard: leaderboardRes.status,
+            analytics: analyticsRes.status === 'ok' || analyticsRes.total_users !== undefined ? 'ok' : 'error'
+        },
+        dashboard: {
+            users: analyticsRes.total_users || 0,
+            activeGames: analyticsRes.total_scored || 0,
+            activeTimers: analyticsRes.total_sessions || 0,
+            activeToday: analyticsRes.active_today || 0
+        }
     });
   } catch (err) {
     next(err);

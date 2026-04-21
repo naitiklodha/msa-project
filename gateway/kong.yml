@@ -32,7 +32,6 @@ plugins:
       policy: redis
       redis_host: redis
       redis_port: 6379
-    redis_timeout: 2000
 
 services:
   - name: auth-service
@@ -63,8 +62,9 @@ services:
     routes:
       - name: rag-public
         paths:
-          - /rag/healthz
-          - /rag/metrics
+          - /rag/
+        strip_path: true
+
       - name: rag-protected
         paths:
           - /documents
@@ -92,6 +92,22 @@ services:
               secret_is_base64: false
               run_on_preflight: true
 
+  - name: quiz-service
+    url: http://rag-service:8080/documents/quiz
+    routes:
+      - name: quiz-public
+        paths:
+          - /quiz/healthz
+      - name: quiz-protected
+        paths:
+          - /quiz
+        strip_path: true
+        plugins:
+          - name: jwt
+            config:
+              secret_is_base64: false
+              run_on_preflight: true
+
   - name: frontend
     url: http://frontend:80
     routes:
@@ -106,6 +122,10 @@ services:
         paths:
           - /api/healthz
           - /api/metrics
+      - name: bff-dashboard
+        paths:
+          - /api/dashboard
+        strip_path: false
       - name: bff-ws
         paths:
           - /socket.io
@@ -115,6 +135,7 @@ services:
       - name: bff-protected
         paths:
           - /api
+        strip_path: false
         plugins:
           - name: jwt
             config:
@@ -124,20 +145,19 @@ services:
   - name: leaderboard-service
     url: http://leaderboard-service:3005
     routes:
+      - name: leaderboard-public
+        paths:
+          - /api/leaderboard
+        strip_path: true
       - name: leaderboard-ws
         paths:
           - /ws/leaderboard
         protocols:
           - http
           - https
-        plugins:
-          - name: jwt
-            config:
-              secret_is_base64: false
-              run_on_preflight: true
 
   - name: notification-svc
-    url: http://notification-svc:3007
+    url: http://notification-service:3007
     routes:
       - name: notification-protected
         paths:
@@ -147,6 +167,45 @@ services:
             config:
               secret_is_base64: false
               run_on_preflight: true
+
+  - name: analytics-service
+    url: http://analytics-service:4000
+    routes:
+      - name: analytics-public
+        paths:
+          - /analytics/healthz
+      - name: analytics-protected
+        paths:
+          - /analytics
+        plugins:
+          - name: jwt
+            config:
+              secret_is_base64: false
+              run_on_preflight: true
+
+  - name: room-service
+    url: http://room-service:3008
+    routes:
+      - name: room-public
+        paths:
+          - /rooms/status
+        strip_path: true
+      - name: room-protected
+        paths:
+          - /rooms
+        strip_path: true
+        plugins:
+          - name: jwt
+            config:
+              secret_is_base64: false
+              run_on_preflight: true
+      - name: room-ws
+        paths:
+          - /ws/rooms
+        protocols:
+          - http
+          - https
+        strip_path: true
 
 consumers:
   - username: focuspulse-app

@@ -1,11 +1,12 @@
 import json
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, Depends
 
 from ..file_processing import extract_text_from_file
-from ..rag_service import process_upload, list_user_documents
+from ..rag_service import process_upload, list_user_documents, list_room_documents
 from ..auth import get_current_user
 from ..cache import (
     get_cached_topics, 
@@ -21,9 +22,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 
+@router.get("/quiz/healthz")
+def quiz_healthz() -> dict[str, str]:
+    return {"status": "ok", "service": "rag-quiz-bridge"}
+
+
 @router.post("/upload/breakdown-with-questions")
 async def upload_with_questions(
     file: UploadFile = File(...),
+    room_id: str = Form(None),
     user_id: str = Depends(get_current_user)
 ) -> dict[str, Any]:
     """
@@ -42,7 +49,13 @@ async def upload_with_questions(
         text = "" # Fallback
     
     # Process the upload through the deduplication flow
-    result = process_upload(file_bytes=raw_bytes, file_name=file.filename, extracted_text=text, user_id=user_id)
+    result = process_upload(
+        file_bytes=raw_bytes, 
+        file_name=file.filename, 
+        extracted_text=text, 
+        user_id=user_id,
+        room_id=room_id
+    )
     
     return result
 
@@ -50,51 +63,38 @@ async def upload_with_questions(
 @router.get("")
 def get_documents(
     limit: int = Query(default=20, ge=1, le=100),
+    room_id: str = Query(None),
     user_id: str = Depends(get_current_user)
 ) -> dict[str, Any]:
+    if room_id:
+        return list_room_documents(room_id)
     return list_user_documents(user_id)
 
 
 @router.get("/{document_id}/topics")
 def fetch_topics(document_id: str, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
-    topics = get_cached_topics(document_id)
-    if not topics:
-        # Note: If cache expires, it currently doesn't re-fetch from DB in this direct endpoint.
-        # process_upload auto-caches it. Let's assume the client gets topics from upload.
-        raise HTTPException(status_code=404, detail="Topics not found in cache.")
-    return topics
+    from ..rag_service import get_topics_from_cache
+    topics = get_topics_from_cache(document_id)
+    return {"topics": topics}
 
 
-@router.get("/{document_id}/chunks/{chunk_id}/questions")
-def fetch_questions(document_id: str, chunk_id: str, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
-    questions = get_cached_questions(document_id, chunk_id)
-    if not questions:
-        # We would need to fetch from Postgres. For brevity, assuming cache hit from RAG process.
-        # But we should really fetch from DB if miss.
-        from ..db import get_connection
-        with get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT id, question, options, answer, difficulty FROM questions WHERE chunk_id = %s", (chunk_id,))
-                rows = cur.fetchall()
-                questions = [{"id": str(r[0]), "question": r[1], "options": r[2], "answer": r[3], "difficulty": r[4]} for r in rows]
-                if questions:
-                    from ..cache import set_cached_questions
-                    set_cached_questions(document_id, chunk_id, questions)
-    
-    if not questions:
-        return {"questions": []}
-    
-    # Optional: Filter out questions user already saw using user_question_attempts
-    # ...
-    
-    return {"questions": questions}
+@router.delete("/{document_id}")
+def remove_document(document_id: str, user_id: str = Depends(get_current_user)) -> dict[str, str]:
+    from ..rag_service import delete_document
+    delete_document(document_id, user_id)
+    return {"status": "document deleted"}
 
 
 @router.post("/quiz/start")
-def start_quiz(document_id: str, chunk_id: str, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
+def start_quiz(
+    document_id: str, 
+    chunk_id: str, 
+    room_id: str = Query(None), 
+    user_id: str = Depends(get_current_user)
+) -> dict[str, Any]:
     # Fetch questions
-    questions_response = fetch_questions(document_id, chunk_id, user_id)
-    questions = questions_response.get("questions", [])
+    from ..rag_service import get_questions_from_db
+    questions = get_questions_from_db(document_id, chunk_id)
     
     if not questions:
         raise HTTPException(status_code=404, detail="No questions found for this topic.")
@@ -147,7 +147,7 @@ def submit_answer(
 
 
 @router.post("/quiz/{session_id}/complete")
-def complete_quiz(session_id: str, user_id: str = Depends(get_current_user)) -> dict[str, Any]:
+def complete_quiz(session_id: str, room_id: str = Query(None), user_id: str = Depends(get_current_user)) -> dict[str, Any]:
     results = get_session_results(session_id)
     if not results:
         # Maybe user finished without answering anything or session expired
@@ -155,16 +155,34 @@ def complete_quiz(session_id: str, user_id: str = Depends(get_current_user)) -> 
         
     correct_count = sum(1 for r in results if r)
     total = len(results)
-    # Simple scoring: 10 points per correct answer
-    score = correct_count * 10
+    
+    # 1. Base Score: 100 points per correct answer
+    base_score = correct_count * 100
+    
+    # 2. Time-based Scoring (Bonus for speed)
+    from ..cache import get_session_start_time
+    start_time = get_session_start_time(session_id)
+    duration = 0
+    speed_bonus = 0
+    if start_time:
+        duration = round(time.time() - start_time, 2)
+        # Par time: 15 seconds per question
+        par_time = total * 15
+        if correct_count > 0 and duration < par_time:
+            # 2 points per second under par
+            speed_bonus = int((par_time - duration) * 2)
+    
+    score = base_score + speed_bonus
     
     # Emit event to Kafka for game-service to pick up
     event_data = {
         "userId": user_id,
+        "roomId": room_id,
         "sessionId": session_id,
         "score": score,
         "correctAnswers": correct_count,
         "totalQuestions": total,
+        "durationSeconds": duration,
         "timestamp": "now" 
     }
     emit_event("game-events", "QUIZ_COMPLETED", event_data)
@@ -172,5 +190,7 @@ def complete_quiz(session_id: str, user_id: str = Depends(get_current_user)) -> 
     return {
         "score": score,
         "correct_count": correct_count,
-        "total": total
+        "total": total,
+        "duration": duration,
+        "speed_bonus": speed_bonus
     }

@@ -86,6 +86,11 @@ services:
         condition: service_healthy
       frontend:
         condition: service_healthy
+      analytics-service:
+        condition: service_healthy
+      leaderboard-service:
+        condition: service_healthy
+
 
   # --- Frontend ---
   frontend:
@@ -99,6 +104,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 3
+    depends_on:
       rag-service:
         condition: service_healthy
 
@@ -144,7 +150,7 @@ services:
       NODE_ENV: production
     depends_on:
       kafka:
-        condition: service_health
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
@@ -152,8 +158,8 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:${GAME_SERVICE_PORT}/healthz || exit 1"]
       interval: 5s
-      timeout: 3s
-      retries: 3
+      timeout: 5s
+      retries: 5
 
   timer-service:
     build:
@@ -182,13 +188,15 @@ services:
       dockerfile: services/rag-service/Dockerfile
     environment:
       POSTGRES_URL: ${POSTGRES_URL}
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
-      GEMINI_LLM_MODEL: ${GEMINI_LLM_MODEL:-gemini-2.0-flash}
-      EMBEDDING_DIM: ${EMBEDDING_DIM:-768}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_LLM_MODEL: ${OPENAI_LLM_MODEL:-gpt-4o-mini}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       PORT: ${RAG_SERVICE_PORT}
       JWT_SECRET: ${JWT_SECRET}
       KAFKA_BROKERS: ${KAFKA_BROKERS}
+      PYTHONUNBUFFERED: 1
+
  
     depends_on:
       postgres:
@@ -213,6 +221,8 @@ services:
 #      QUIZ_SERVICE_URL: http://quiz-service:${QUIZ_SERVICE_PORT}
       TIMER_SERVICE_URL: http://timer-service:${TIMER_SERVICE_PORT}
       RAG_SERVICE_URL: http://rag-service:${RAG_SERVICE_PORT}
+      LEADERBOARD_SERVICE_URL: http://leaderboard-service:${LEADERBOARD_SERVICE_PORT:-3005}
+      ANALYTICS_SERVICE_URL: http://analytics-service:${ANALYTICS_SERVICE_PORT:-4000}
       KAFKA_BROKERS: ${KAFKA_BROKERS}
       REDIS_URL: ${REDIS_URL}
       PG_CONNECTION_STRING: ${PG_CONNECTION_STRING}
@@ -225,6 +235,97 @@ services:
       interval: 5s
       timeout: 3s
       retries: 3
+
+  leaderboard-service:
+    build:
+      context: .
+      dockerfile: services/leaderboard-service/Dockerfile
+    environment:
+      SERVICE_NAME: leaderboard-service
+      PORT: ${LEADERBOARD_SERVICE_PORT:-3005}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      PG_CONNECTION_STRING: ${PG_CONNECTION_STRING}
+      NODE_ENV: production
+    depends_on:
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3005/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  room-service:
+    build:
+      context: .
+      dockerfile: services/room-service/Dockerfile
+    environment:
+      SERVICE_NAME: room-service
+      PORT: ${ROOM_SERVICE_PORT:-3008}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      PG_CONNECTION_STRING: ${PG_CONNECTION_STRING}
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3008/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  notification-service:
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    environment:
+      SERVICE_NAME: notification-service
+      PORT: ${NOTIFICATION_SERVICE_PORT:-3007}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      NODE_ENV: production
+    depends_on:
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3007/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  analytics-service:
+    build:
+      context: ./services/analytics-service
+      dockerfile: Dockerfile
+    environment:
+      PG_CONNECTION_STRING: ${PG_CONNECTION_STRING}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+      PORT: ${ANALYTICS_SERVICE_PORT:-4000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # --- Background Workers ---
   # These guys just sit in the background and chew through Kafka events.
@@ -242,6 +343,8 @@ services:
       kafka:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      leaderboard-service:
         condition: service_healthy
 
 volumes:

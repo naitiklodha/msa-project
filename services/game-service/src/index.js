@@ -65,6 +65,20 @@ async function bootstrap() {
     res.json({ status: 'active', userId: req.userId });
   });
 
+  // Post a score from a mini game
+  app.post('/score-mini-game', auth, async (req, res, next) => {
+    try {
+      const { gameName, score } = req.body;
+      if (!gameName || score === undefined) {
+        return res.status(400).json({ error: 'gameName and score required' });
+      }
+      const result = await service.scoreMiniGame(req.userId, gameName, score);
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   app.use(errorHandler);
   app.listen(config.port, () => logger.info({ msg: `Game service listening`, port: config.port }));
 }

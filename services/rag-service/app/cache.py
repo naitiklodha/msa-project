@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from typing import Any, Optional
 import redis
 from .config import REDIS_URL
@@ -34,23 +35,25 @@ def set_cached_document_id(doc_hash: str, doc_id: str) -> None:
         logger.error(f"Redis set error (exists): {e}")
 
 
-def get_cached_topics(doc_id: str) -> Optional[dict[str, Any]]:
+def get_cached_topics(doc_id: str) -> Optional[list[dict[str, Any]]]:
     if not redis_client:
         return None
     try:
         cached = redis_client.get(f"doc:{doc_id}:topics")
         if cached:
-            return json.loads(cached)
+            data = json.loads(cached)
+            # Handle legacy wrapped objects
+            return data.get("topics") if isinstance(data, dict) and "topics" in data else data
     except Exception as e:
         logger.error(f"Redis get error (topics): {e}")
     return None
 
 
-def set_cached_topics(doc_id: str, topics_data: dict[str, Any]) -> None:
+def set_cached_topics(doc_id: str, topics: list[dict[str, Any]]) -> None:
     if not redis_client:
         return
     try:
-        redis_client.setex(f"doc:{doc_id}:topics", 3600, json.dumps(topics_data)) # 1h
+        redis_client.setex(f"doc:{doc_id}:topics", 3600, json.dumps(topics)) # 1h
     except Exception as e:
         logger.error(f"Redis set error (topics): {e}")
 
@@ -61,7 +64,9 @@ def get_cached_questions(doc_id: str, chunk_id: str) -> Optional[list[dict[str, 
     try:
         cached = redis_client.get(f"doc:{doc_id}:questions:{chunk_id}")
         if cached:
-            return json.loads(cached)
+            data = json.loads(cached)
+            # Handle legacy wrapped objects
+            return data.get("questions") if isinstance(data, dict) and "questions" in data else data
     except Exception as e:
         logger.error(f"Redis get error (questions): {e}")
     return None
@@ -89,7 +94,25 @@ def start_quiz_session(questions: list[dict[str, Any]]) -> str:
             redis_client.expire(session_key, 1800)  # 30 min TTL
     except Exception as e:
         logger.error(f"Redis error (start session): {e}")
+    
+    # Store start time for time-based scoring
+    try:
+        redis_client.setex(f"session:{session_id}:start_time", 1800, str(time.time()))
+    except Exception as e:
+        logger.error(f"Redis error (set start time): {e}")
+        
     return session_id
+
+
+def get_session_start_time(session_id: str) -> Optional[float]:
+    if not redis_client:
+        return None
+    try:
+        val = redis_client.get(f"session:{session_id}:start_time")
+        return float(val) if val else None
+    except Exception as e:
+        logger.error(f"Redis error (get start time): {e}")
+        return None
 
 
 def get_next_question_id(session_id: str) -> Optional[str]:
