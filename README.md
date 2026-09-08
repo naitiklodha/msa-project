@@ -56,6 +56,38 @@ npm run test:smoke
 
 ---
 
+## 🌐 Multi-Node Deployment (Docker Swarm)
+If you want to run Opalite across multiple computers (e.g., for a faculty demo), we use **Docker Swarm**.
+
+1.  **Initialize Swarm** (on your Main Computer):
+    ```bash
+    docker swarm init
+    ```
+    *Note the "Join Command" it gives you.*
+
+2.  **Join Worker Nodes** (on other Computers):
+    Run the join command on your secondary machines to link them to the cluster.
+
+3.  **Build Images**:
+    Ensure your images are built locally on the manager node:
+    ```bash
+    docker compose build
+    ```
+
+4.  **Deploy the Stack**:
+    ```bash
+    docker stack deploy -c docker-stack.yml opalite
+    ```
+
+5.  **Monitor the Cluster**:
+    ```bash
+    docker stack ps opalite
+    ```
+
+**Note**: In Swarm mode, databases are pinned to the **Manager** node via placement constraints to ensure data persistence stability without a shared filesystem.
+
+---
+
 ## 🛠️ Troubleshooting
 *   **Port Collisions**: If you get a "port already allocated" error, you probably have a local Postgres or Redis running. Shut them down and try again.
 *   **Logs**: If something feels broken, check the logs for that specific service:

@@ -1,0 +1,276 @@
+# msa-project: Docker Swarm Deployment Stack
+# This file is optimized for distributed deployments across multiple nodes.
+
+version: '3.8'
+
+services:
+  # --- Databases & Storage ---
+  # Pinned to manager nodes for data persistence stability in a demo environment.
+  postgres:
+    image: pgvector/pgvector:pg15
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - opalite-net
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+      restart_policy:
+        condition: on-failure
+
+  redis:
+    image: redis:7-alpine
+    networks:
+      - opalite-net
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+      restart_policy:
+        condition: on-failure
+
+  kafka:
+    image: apache/kafka:latest
+    environment:
+      - KAFKA_NODE_ID=1
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@kafka:9093
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    networks:
+      - opalite-net
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+      restart_policy:
+        condition: on-failure
+
+  # --- API Gateway ---
+  kong:
+    image: kong:3.4
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001
+    volumes:
+      - ./gateway/kong.yml:/etc/kong/kong.yml
+    ports:
+      - "8000:8000"
+      - "8001:8001"
+    networks:
+      - opalite-net
+    deploy:
+      restart_policy:
+        condition: on-failure
+
+  # --- Frontend ---
+  frontend:
+    image: msa-project-frontend:latest
+    ports:
+      - "8002:80"
+    networks:
+      - opalite-net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  # --- Core Services ---
+  auth-service:
+    image: msa-project-auth-service:latest
+    environment:
+      SERVICE_NAME: auth-service
+      PORT: ${AUTH_SERVICE_PORT}
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379
+      PG_CONNECTION_STRING: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      NODE_ENV: production
+    networks:
+      - opalite-net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  game-service:
+    image: msa-project-game-service:latest
+    environment:
+      SERVICE_NAME: game-service
+      PORT: ${GAME_SERVICE_PORT}
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379
+      PG_CONNECTION_STRING: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      NODE_ENV: production
+    networks:
+      - opalite-net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  timer-service:
+    image: msa-project-timer-service:latest
+    environment:
+      SERVICE_NAME: timer-service
+      PORT: ${TIMER_SERVICE_PORT}
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379
+      PG_CONNECTION_STRING: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      NODE_ENV: production
+    networks:
+      - opalite-net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  rag-service:
+    image: msa-project-rag-service:latest
+    environment:
+      POSTGRES_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      OPENAI_LLM_MODEL: ${OPENAI_LLM_MODEL:-gpt-4o-mini}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
+      REDIS_URL: redis://redis:6379
+      PORT: ${RAG_SERVICE_PORT}
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: kafka:9092
+      PYTHONUNBUFFERED: 1
+    networks:
+      - opalite-net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  bff:
+    image: msa-project-bff:latest
+    environment:
+      SERVICE_NAME: bff
+      PORT: ${BFF_PORT}
+      AUTH_SERVICE_URL: http://auth-service:${AUTH_SERVICE_PORT}
+      GAME_SERVICE_URL: http://game-service:${GAME_SERVICE_PORT}
+      TIMER_SERVICE_URL: http://timer-service:${TIMER_SERVICE_PORT}
+      RAG_SERVICE_URL: http://rag-service:${RAG_SERVICE_PORT}
+      LEADERBOARD_SERVICE_URL: http://leaderboard-service:3005
+      ANALYTICS_SERVICE_URL: http://analytics-service:4000
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379
+      PG_CONNECTION_STRING: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      NODE_ENV: production
+    ports:
+      - "${BFF_PORT}:${BFF_PORT}"
+    networks:
+      - opalite-net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  leaderboard-service:
+    image: msa-project-leaderboard-service:latest
+    environment:
+      SERVICE_NAME: leaderboard-service
+      PORT: 3005
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: kafka:9092
+      PG_CONNECTION_STRING: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      NODE_ENV: production
+    networks:
+      - opalite-net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  room-service:
+    image: msa-project-room-service:latest
+    environment:
+      SERVICE_NAME: room-service
+      PORT: 3008
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BROKERS: kafka:9092
+      PG_CONNECTION_STRING: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      NODE_ENV: production
+    networks:
+      - opalite-net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  notification-service:
+    image: msa-project-notification-service:latest
+    environment:
+      SERVICE_NAME: notification-service
+      PORT: 3007
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      NODE_ENV: production
+    networks:
+      - opalite-net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  analytics-service:
+    image: msa-project-analytics-service:latest
+    environment:
+      PG_CONNECTION_STRING: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      KAFKA_BROKERS: kafka:9092
+      PORT: 4000
+    networks:
+      - opalite-net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  leaderboard-consumer:
+    image: msa-project-leaderboard-consumer:latest
+    environment:
+      SERVICE_NAME: leaderboard-consumer
+      KAFKA_BROKERS: kafka:9092
+      REDIS_URL: redis://redis:6379
+      PG_CONNECTION_STRING: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+    networks:
+      - opalite-net
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+networks:
+  opalite-net:
+    driver: overlay
+    attachable: true
+
+volumes:
+  postgres-data:
+  kafka-data:
+  kafka-secrets:
