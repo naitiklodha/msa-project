@@ -10,12 +10,30 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+    origin: config.corsOrigins,
+    methods: ["GET", "POST"],
+    credentials: true,
   }
 });
 
 const { metricsMiddleware, metricsHandler } = createMetrics(config.serviceName);
+
+function requiredServiceUrl(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`${name} is required`);
+  }
+  return value.replace(/\/+$/, '');
+}
+
+const serviceUrls = {
+  auth: requiredServiceUrl('AUTH_SERVICE_URL'),
+  game: requiredServiceUrl('GAME_SERVICE_URL'),
+  timer: requiredServiceUrl('TIMER_SERVICE_URL'),
+  rag: requiredServiceUrl('RAG_SERVICE_URL'),
+  leaderboard: requiredServiceUrl('LEADERBOARD_SERVICE_URL'),
+  analytics: requiredServiceUrl('ANALYTICS_SERVICE_URL'),
+};
 
 app.use(express.json());
 app.use(requestId);
@@ -37,12 +55,12 @@ app.get('/api/dashboard', async (req, res, next) => {
     };
 
     const [authRes, gameRes, timerRes, ragRes, leaderboardRes, analyticsRes] = await Promise.all([
-      fetchData(`${process.env.AUTH_SERVICE_URL || 'http://auth-service:3001'}/healthz`),
-      fetchData(`${process.env.GAME_SERVICE_URL || 'http://game-service:3002'}/healthz`),
-      fetchData(`${process.env.TIMER_SERVICE_URL || 'http://timer-service:3004'}/healthz`),
-      fetchData(`${process.env.RAG_SERVICE_URL || 'http://rag-service:8080'}/healthz`),
-      fetchData(`${process.env.LEADERBOARD_SERVICE_URL || 'http://leaderboard-service:3005'}/healthz`),
-      fetchData(`${process.env.ANALYTICS_SERVICE_URL || 'http://analytics-service:4000'}/overview`)
+      fetchData(`${serviceUrls.auth}/health/live`),
+      fetchData(`${serviceUrls.game}/health/live`),
+      fetchData(`${serviceUrls.timer}/health/live`),
+      fetchData(`${serviceUrls.rag}/health/live`),
+      fetchData(`${serviceUrls.leaderboard}/health/live`),
+      fetchData(`${serviceUrls.analytics}/overview`)
     ]);
 
     // Constructing actual stats from the Go analytics service data
@@ -90,3 +108,12 @@ io.on('connection', (socket) => {
 });
 
 server.listen(config.port, () => logger.info({ msg: `BFF listening on port ${config.port}`, port: config.port }));
+
+async function shutdown(signal) {
+  logger.info({ msg: `${signal} - shutting down` });
+  await new Promise((resolve) => server.close(resolve));
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

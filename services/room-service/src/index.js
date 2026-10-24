@@ -34,7 +34,8 @@ app.use((req, res, next) => {
 });
 
 const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] }
+  path: '/ws/rooms',
+  cors: { origin: config.corsOrigins, methods: ["GET", "POST"], credentials: true }
 });
 
 const pool = new Pool({ connectionString: config.pgConnectionString });
@@ -110,6 +111,7 @@ app.post('/create', express.json(), auth, async (req, res, next) => {
 });
 
 // Health check mounted at specific path to avoid greediness
+app.use('/', healthRoutes(config.serviceName, pool, redis));
 app.use('/status', healthRoutes(config.serviceName, pool, redis));
 
 /**
@@ -351,3 +353,13 @@ app.use(errorHandler);
 server.listen(config.port, () => {
   logger.info({ msg: `Room Service listening`, port: config.port });
 });
+
+async function shutdown(signal) {
+  logger.info({ msg: `${signal} - shutting down` });
+  await new Promise((resolve) => server.close(resolve));
+  await Promise.allSettled([pool.end(), redis.quit(), kafka.disconnect()]);
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

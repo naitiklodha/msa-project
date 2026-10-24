@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { leaderboardAPI } from '../api';
 import { io } from 'socket.io-client';
+import { wsBaseUrl } from '../config';
 import { 
   Trophy, 
   Medal, 
@@ -32,9 +33,7 @@ const Leaderboard = () => {
 
     fetchBoard();
 
-    // The leaderboard service emits on its own namespace or we proxy it through BFF
-    // Based on kong.yml, /ws/leaderboard proxies to leaderboard-service:3005
-    const socket = io('http://localhost:8000', { path: '/ws/leaderboard' });
+    const socket = io(wsBaseUrl, { path: '/ws/leaderboard' });
     
     socket.on('leaderboard_update', (update) => {
       setBoard(update.leaderboard || update || []);

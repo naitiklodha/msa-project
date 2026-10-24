@@ -19,7 +19,8 @@ const {
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "*" }
+  path: '/ws/leaderboard',
+  cors: { origin: config.corsOrigins, credentials: true }
 });
 
 const { metricsMiddleware, metricsHandler } = createMetrics(config.serviceName);
@@ -106,6 +107,7 @@ async function bootstrap() {
 // Graceful shutdown
 const shutdown = async (signal) => {
   logger.info({ msg: `${signal} — shutting down` });
+  await new Promise((resolve) => server.close(resolve));
   await redis?.quit();
   process.exit(0);
 };

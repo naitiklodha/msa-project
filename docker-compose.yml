@@ -68,6 +68,18 @@ services:
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_ADMIN_LISTEN: ${KONG_ADMIN_LISTEN:-0.0.0.0:8001}
       KONG_DNS_RESOLVER: 127.0.0.11
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      KONG_CORS_ORIGIN: ${KONG_CORS_ORIGIN}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL}
+      GAME_SERVICE_URL: ${GAME_SERVICE_URL}
+      TIMER_SERVICE_URL: ${TIMER_SERVICE_URL}
+      RAG_SERVICE_URL: ${RAG_SERVICE_URL}
+      BFF_SERVICE_URL: ${BFF_SERVICE_URL}
+      LEADERBOARD_SERVICE_URL: ${LEADERBOARD_SERVICE_URL}
+      NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL}
+      ROOM_SERVICE_URL: ${ROOM_SERVICE_URL}
+      ANALYTICS_SERVICE_URL: ${ANALYTICS_SERVICE_URL}
+      FRONTEND_SERVICE_URL: ${FRONTEND_SERVICE_URL}
     volumes:
       - ./gateway/kong.yml:/etc/kong/kong.yml
     ports:
@@ -99,6 +111,10 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8002:80"
+    environment:
+      KONG_UPSTREAM_URL: ${KONG_UPSTREAM_URL}
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+      VITE_WS_BASE_URL: ${VITE_WS_BASE_URL}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:80/ || exit 1"]
       interval: 5s
@@ -130,7 +146,7 @@ services:
       kafka:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:${AUTH_SERVICE_PORT}/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${PORT}/health/live || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 3
@@ -156,7 +172,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:${GAME_SERVICE_PORT}/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${PORT}/health/live || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -177,7 +193,7 @@ services:
       kafka:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:${TIMER_SERVICE_PORT}/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${PORT}/health/live || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 3
@@ -188,9 +204,10 @@ services:
       dockerfile: services/rag-service/Dockerfile
     environment:
       POSTGRES_URL: ${POSTGRES_URL}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_LLM_MODEL: ${OPENAI_LLM_MODEL:-gpt-4o-mini}
-      EMBEDDING_DIM: ${EMBEDDING_DIM:-1536}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      GEMINI_LLM_MODEL: ${GEMINI_LLM_MODEL:-gemini-2.0-flash}
+      GEMINI_EMBEDDING_MODEL: ${GEMINI_EMBEDDING_MODEL:-models/text-embedding-004}
+      EMBEDDING_DIM: ${EMBEDDING_DIM:-768}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       PORT: ${RAG_SERVICE_PORT}
       JWT_SECRET: ${JWT_SECRET}
@@ -204,7 +221,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')\" || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8080') + '/health/live')\" || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 15
@@ -216,13 +233,14 @@ services:
     environment:
       SERVICE_NAME: bff
       PORT: ${BFF_PORT}
-      AUTH_SERVICE_URL: http://auth-service:${AUTH_SERVICE_PORT}
-      GAME_SERVICE_URL: http://game-service:${GAME_SERVICE_PORT}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL}
+      GAME_SERVICE_URL: ${GAME_SERVICE_URL}
 #      QUIZ_SERVICE_URL: http://quiz-service:${QUIZ_SERVICE_PORT}
-      TIMER_SERVICE_URL: http://timer-service:${TIMER_SERVICE_PORT}
-      RAG_SERVICE_URL: http://rag-service:${RAG_SERVICE_PORT}
-      LEADERBOARD_SERVICE_URL: http://leaderboard-service:${LEADERBOARD_SERVICE_PORT:-3005}
-      ANALYTICS_SERVICE_URL: http://analytics-service:${ANALYTICS_SERVICE_PORT:-4000}
+      TIMER_SERVICE_URL: ${TIMER_SERVICE_URL}
+      RAG_SERVICE_URL: ${RAG_SERVICE_URL}
+      LEADERBOARD_SERVICE_URL: ${LEADERBOARD_SERVICE_URL}
+      ANALYTICS_SERVICE_URL: ${ANALYTICS_SERVICE_URL}
+      CORS_ORIGINS: ${CORS_ORIGINS}
       KAFKA_BROKERS: ${KAFKA_BROKERS}
       REDIS_URL: ${REDIS_URL}
       PG_CONNECTION_STRING: ${PG_CONNECTION_STRING}
@@ -231,7 +249,7 @@ services:
     ports:
       - "${BFF_PORT}:${BFF_PORT}"
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:${BFF_PORT}/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${PORT}/health/live || exit 1"]
       interval: 5s
       timeout: 3s
       retries: 3
@@ -242,19 +260,20 @@ services:
       dockerfile: services/leaderboard-service/Dockerfile
     environment:
       SERVICE_NAME: leaderboard-service
-      PORT: ${LEADERBOARD_SERVICE_PORT:-3005}
+      PORT: ${LEADERBOARD_SERVICE_PORT}
       REDIS_URL: ${REDIS_URL}
       JWT_SECRET: ${JWT_SECRET}
       KAFKA_BROKERS: ${KAFKA_BROKERS}
       PG_CONNECTION_STRING: ${PG_CONNECTION_STRING}
       NODE_ENV: production
+      CORS_ORIGINS: ${CORS_ORIGINS}
     depends_on:
       redis:
         condition: service_healthy
       kafka:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3005/healthz || exit 1"]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:' + process.env.PORT + '/health/live').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -266,12 +285,13 @@ services:
       dockerfile: services/room-service/Dockerfile
     environment:
       SERVICE_NAME: room-service
-      PORT: ${ROOM_SERVICE_PORT:-3008}
+      PORT: ${ROOM_SERVICE_PORT}
       REDIS_URL: ${REDIS_URL}
       JWT_SECRET: ${JWT_SECRET}
       KAFKA_BROKERS: ${KAFKA_BROKERS}
       PG_CONNECTION_STRING: ${PG_CONNECTION_STRING}
       NODE_ENV: production
+      CORS_ORIGINS: ${CORS_ORIGINS}
     depends_on:
       postgres:
         condition: service_healthy
@@ -280,7 +300,7 @@ services:
       kafka:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3008/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${PORT}/health/live || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -292,7 +312,7 @@ services:
       dockerfile: services/notification-service/Dockerfile
     environment:
       SERVICE_NAME: notification-service
-      PORT: ${NOTIFICATION_SERVICE_PORT:-3007}
+      PORT: ${NOTIFICATION_SERVICE_PORT}
       KAFKA_BROKERS: ${KAFKA_BROKERS}
       REDIS_URL: ${REDIS_URL}
       JWT_SECRET: ${JWT_SECRET}
@@ -303,7 +323,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3007/healthz || exit 1"]
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:' + process.env.PORT + '/health/live').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 5s
       timeout: 3s
       retries: 3
@@ -315,14 +335,14 @@ services:
     environment:
       PG_CONNECTION_STRING: ${PG_CONNECTION_STRING}
       KAFKA_BROKERS: ${KAFKA_BROKERS}
-      PORT: ${ANALYTICS_SERVICE_PORT:-4000}
+      PORT: ${ANALYTICS_SERVICE_PORT}
     depends_on:
       postgres:
         condition: service_healthy
       kafka:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:4000/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${PORT}/health/live || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5

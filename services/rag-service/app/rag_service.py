@@ -6,9 +6,9 @@ import hashlib
 from typing import Any, Generator
 
 from fastapi import HTTPException
-from openai import OpenAI
+from google import genai
 
-from .config import OPENAI_API_KEY, LLM_MODEL
+from .config import GOOGLE_API_KEY, LLM_MODEL
 from .db import get_connection
 from .embedding import embed_document, embed_query, to_pgvector
 from .chunking import chunk_text
@@ -24,7 +24,12 @@ from .cache import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-llm_client = OpenAI(api_key=OPENAI_API_KEY)
+llm_client = genai.Client(api_key=GOOGLE_API_KEY)
+
+
+def generate_text(prompt: str) -> str:
+    response = llm_client.models.generate_content(model=LLM_MODEL, contents=prompt)
+    return response.text or ""
 
 
 def link_user_to_document(user_id: str, document_id: str) -> None:
@@ -452,13 +457,9 @@ def query_documents(query: str, top_k: int, user_id: str, room_id: str = None) -
     )
     llm_response = None
     try:
-        completion = llm_client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        answer = completion.choices[0].message.content
+        answer = generate_text(prompt)
     except Exception as e:
-        logger.error(f"OpenAI Query Error: {str(e)}")
+        logger.error(f"Gemini query error: {str(e)}")
         answer = "Failed to generate answer."
 
     return {
@@ -510,16 +511,11 @@ def stream_query_documents(query: str, top_k: int, user_id: str) -> Generator[st
         f"CONTEXT:\n{chr(10).join(contexts) if contexts else 'No context found.'}"
     )
     try:
-        response = llm_client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            stream=True
-        )
-        for chunk in response:
-            if chunk.choices[0].delta.content:
-                yield json.dumps({"type": "chunk", "content": chunk.choices[0].delta.content}) + "\n"
+        for chunk in llm_client.models.generate_content_stream(model=LLM_MODEL, contents=prompt):
+            if chunk.text:
+                yield json.dumps({"type": "chunk", "content": chunk.text}) + "\n"
     except Exception as e:
-        logger.error(f"OpenAI Stream Error: {str(e)}")
+        logger.error(f"Gemini stream error: {str(e)}")
 
 
 # ---------------------------------------------------------
@@ -543,16 +539,11 @@ def generate_questions(part_content: str, part_title: str) -> list[dict[str, Any
         f"CONTENT:\n{part_content}"
     )
     try:
-        completion = llm_client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"}
-        )
-        response_text = completion.choices[0].message.content
+        response_text = generate_text(prompt)
         print(json.loads(response_text).get("questions", json.loads(response_text)))
         return json.loads(response_text).get("questions", json.loads(response_text))
     except Exception as e:
-        logger.error(f"OpenAI generate_questions error: {str(e)}")
+        logger.error(f"Gemini generate_questions error: {str(e)}")
         return []
 
 
@@ -576,16 +567,11 @@ def summarize_text(text: str) -> dict[str, Any]:
     )
     try:
         logger.info(f"Summarizing with {LLM_MODEL}...")
-        completion = llm_client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"}
-        )
-        response_text = completion.choices[0].message.content
+        response_text = generate_text(prompt)
         data = json.loads(response_text)
         if "parts" not in data or not data["parts"]:
             return {"number_of_parts": 0, "parts": []}
         return data
     except Exception as e:
-        logger.error(f"OpenAI summarize_text error: {str(e)}")
+        logger.error(f"Gemini summarize_text error: {str(e)}")
         return {"number_of_parts": 0, "parts": []}

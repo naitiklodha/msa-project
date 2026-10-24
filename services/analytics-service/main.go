@@ -1,10 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 )
 
 func main() {
@@ -14,11 +18,15 @@ func main() {
 	InitDB()
 
 	// 2. Start Kafka consumer in background goroutine
-	go StartConsumer()
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
+	go StartConsumer(ctx)
 
 	// 3. HTTP server for REST endpoints
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", HealthHandler)
+	mux.HandleFunc("/health/live", HealthHandler)
+	mux.HandleFunc("/health/ready", HealthHandler)
 	mux.HandleFunc("/overview", OverviewHandler)
 	mux.HandleFunc("/user/", UserStatsHandler)
 
@@ -30,7 +38,20 @@ func main() {
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("[analytics] HTTP server listening on %s", addr)
 
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("[analytics] Server failed: %v", err)
+	server := &http.Server{Addr: addr, Handler: mux}
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("[analytics] Server failed: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("[analytics] HTTP shutdown failed: %v", err)
+	}
+	if db != nil {
+		_ = db.Close()
 	}
 }

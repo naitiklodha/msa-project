@@ -19,12 +19,13 @@ const {
 const authService = require('./services/auth.service');
 
 const app = express();
+let server;
 
 // ── Middleware ──
 const { metricsMiddleware, metricsHandler } = createMetrics(config.serviceName);
 
 app.use(helmet());
-app.use(cors());
+app.use(cors({ origin: config.corsOrigins, credentials: true }));
 app.use(express.json());
 app.use(requestId);
 app.use(metricsMiddleware);
@@ -80,7 +81,7 @@ async function bootstrap() {
   // ── Error Handling ──
   app.use(errorHandler);
 
-  app.listen(config.port, () => {
+  server = app.listen(config.port, () => {
     logger.info({ msg: `Auth service listening`, port: config.port });
   });
 }
@@ -88,6 +89,7 @@ async function bootstrap() {
 // ── Graceful Shutdown ──
 const shutdown = async (signal) => {
   logger.info({ msg: `${signal} — shutting down` });
+  await new Promise((resolve) => server ? server.close(resolve) : resolve());
   await Promise.allSettled([
     kafkaProducer?.disconnect(),
     pgPool?.end(),

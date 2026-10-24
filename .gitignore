@@ -24,6 +24,7 @@ humanizer.md
 tmp/
 temp/
 *.log
+.worktrees/
 .gemini/
 
 __pycache__/

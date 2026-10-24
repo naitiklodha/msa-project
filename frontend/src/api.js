@@ -1,9 +1,8 @@
 import axios from 'axios';
-
-const API_BASE = 'http://localhost:8000'; // Point to Kong gateway explicitly
+import { apiBaseUrl } from './config';
 
 const api = axios.create({
-  baseURL: API_BASE,
+  baseURL: apiBaseUrl,
   headers: { 'Content-Type': 'application/json' },
 });
 
