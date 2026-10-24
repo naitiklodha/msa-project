@@ -4,8 +4,8 @@ const express = require('express');
 
 /**
  * Setting up the health check routes. 
- * /healthz — standard liveness check (just returns 200)
- * /readyz  — readiness check (actually pings PG and Redis)
+ * /health/live — standard liveness check (just returns 200)
+ * /health/ready — readiness check (actually pings PG and Redis)
  */
 function healthRoutes(serviceName, pgPool, redisClient) {
   const router = express.Router();
@@ -16,11 +16,14 @@ function healthRoutes(serviceName, pgPool, redisClient) {
     res.json({ status: 'ok', service: serviceName, path: 'root' });
   });
 
-  router.get('/healthz', (_req, res) => {
+  const live = (_req, res) => {
     res.json({ status: 'ok', service: serviceName });
-  });
+  };
 
-  router.get('/readyz', async (_req, res) => {
+  router.get('/health/live', live);
+  router.get('/healthz', live);
+
+  const ready = async (_req, res) => {
     const checks = {};
 
     try {
@@ -47,7 +50,10 @@ function healthRoutes(serviceName, pgPool, redisClient) {
       service: serviceName,
       checks,
     });
-  });
+  };
+
+  router.get('/health/ready', ready);
+  router.get('/readyz', ready);
 
   return router;
 }

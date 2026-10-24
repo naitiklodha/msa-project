@@ -1,11 +1,11 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"os"
-	"os/signal"
-	"syscall"
+	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 )
@@ -15,14 +15,14 @@ type KafkaEvent struct {
 	EventID   string          `json:"eventId"`
 	EventType string          `json:"eventType"`
 	Source    string          `json:"source"`
-	UserID   string          `json:"userId"`
-	Timestamp string         `json:"timestamp"`
+	UserID    string          `json:"userId"`
+	Timestamp string          `json:"timestamp"`
 	Raw       json.RawMessage `json:"-"`
 }
 
 // StartConsumer connects to Kafka and ingests events into Postgres.
 // It subscribes to user-events, game-events and timer-events.
-func StartConsumer() {
+func StartConsumer(ctx context.Context) {
 	brokers := os.Getenv("KAFKA_BROKERS")
 	if brokers == "" {
 		brokers = "kafka:9092"
@@ -38,6 +38,7 @@ func StartConsumer() {
 	if err != nil {
 		log.Fatalf("[analytics] Kafka consumer creation failed: %v", err)
 	}
+	defer c.Close()
 
 	topics := []string{"user-events", "game-events", "timer-events"}
 	if err := c.SubscribeTopics(topics, nil); err != nil {
@@ -46,21 +47,20 @@ func StartConsumer() {
 
 	log.Printf("[analytics] Kafka consumer started — listening on %v", topics)
 
-	// Graceful shutdown on signal
-	sigchan := make(chan os.Signal, 1)
-	signal.Notify(sigchan, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigchan
-		log.Println("[analytics] Shutting down consumer…")
-		c.Close()
-		os.Exit(0)
-	}()
-
 	// Poll loop
 	for {
-		msg, err := c.ReadMessage(-1)
+		select {
+		case <-ctx.Done():
+			log.Println("[analytics] Shutting down consumer")
+			return
+		default:
+		}
+
+		msg, err := c.ReadMessage(1 * time.Second)
 		if err != nil {
+			if kafkaErr, ok := err.(kafka.Error); ok && kafkaErr.Code() == kafka.ErrTimedOut {
+				continue
+			}
 			log.Printf("[analytics] Consumer error: %v", err)
 			continue
 		}

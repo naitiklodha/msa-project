@@ -22,6 +22,7 @@ import {
     Trash2
 } from 'lucide-react';
 import { io } from 'socket.io-client';
+import { wsBaseUrl } from '../config';
 import { useAuth } from '../AuthContext';
 import { roomAPI, docAPI, quizAPI } from '../api';
 import Quiz from '../Quiz';
@@ -68,8 +69,8 @@ const ActiveRoom = () => {
                 setLeaderboard(lb);
 
                 // Initialize Socket
-                socketRef.current = io('http://localhost:8000', {
-                    path: '/ws/rooms/socket.io',
+                socketRef.current = io(wsBaseUrl, {
+                    path: '/ws/rooms',
                     transports: ['websocket']
                 });
 

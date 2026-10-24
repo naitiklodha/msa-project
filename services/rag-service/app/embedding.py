@@ -1,10 +1,10 @@
 from fastapi import HTTPException
-from openai import OpenAI
+from google import genai
 import time
 
-from .config import EMBEDDING_MODEL, OPENAI_API_KEY, VECTOR_DIM
+from .config import EMBEDDING_MODEL, GOOGLE_API_KEY, VECTOR_DIM
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = genai.Client(api_key=GOOGLE_API_KEY)
 
 
 def to_pgvector(vector: list[float]) -> str:
@@ -15,11 +15,11 @@ def _embed_text(text: str) -> list[float]:
     last_exc: Exception | None = None
     for attempt in range(3):
         try:
-            result = client.embeddings.create(
+            result = client.models.embed_content(
                 model=EMBEDDING_MODEL,
-                input=text
+                contents=text,
             )
-            vector = result.data[0].embedding
+            vector = result.embeddings[0].values
             if len(vector) != VECTOR_DIM:
                 raise HTTPException(
                     status_code=500,

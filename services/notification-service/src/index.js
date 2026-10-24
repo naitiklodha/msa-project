@@ -15,6 +15,7 @@ const {
 } = require('@focuspulse/shared');
 
 const app = express();
+let server;
 const { metricsMiddleware, metricsHandler } = createMetrics(config.serviceName);
 
 app.use(express.json());
@@ -78,12 +79,13 @@ async function bootstrap() {
   });
 
   app.use(errorHandler);
-  app.listen(config.port, () => logger.info({ msg: `Notification service listening`, port: config.port }));
+  server = app.listen(config.port, () => logger.info({ msg: `Notification service listening`, port: config.port }));
 }
 
 // Graceful shutdown
 const shutdown = async (signal) => {
   logger.info({ msg: `${signal} — shutting down` });
+  await new Promise((resolve) => server ? server.close(resolve) : resolve());
   await redis?.quit();
   process.exit(0);
 };

@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { dashboardAPI } from '../api';
 import { io } from 'socket.io-client';
+import { wsBaseUrl } from '../config';
 import { 
   Users, 
   Clock, 
@@ -45,7 +46,7 @@ const Dashboard = () => {
 
     fetchStats();
 
-    const socket = io('http://localhost:8000', { path: '/socket.io' });
+    const socket = io(wsBaseUrl, { path: '/socket.io' });
     socket.on('dashboard_update', (update) => {
       setRealtime(update);
     });

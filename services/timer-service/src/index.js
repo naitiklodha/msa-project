@@ -10,6 +10,7 @@ const {
 const timerService = require('./services/timer.service');
 
 const app = express();
+let server;
 const { metricsMiddleware, metricsHandler } = createMetrics(config.serviceName);
 
 app.use(express.json());
@@ -87,12 +88,13 @@ async function bootstrap() {
   });
 
   app.use(errorHandler);
-  app.listen(config.port, () => logger.info({ msg: `Timer service listening`, port: config.port }));
+  server = app.listen(config.port, () => logger.info({ msg: `Timer service listening`, port: config.port }));
 }
 
 // Graceful shutdown
 const shutdown = async (signal) => {
   logger.info({ msg: `${signal} — shutting down` });
+  await new Promise((resolve) => server ? server.close(resolve) : resolve());
   await Promise.allSettled([pgPool?.end(), redis?.quit()]);
   process.exit(0);
 };
