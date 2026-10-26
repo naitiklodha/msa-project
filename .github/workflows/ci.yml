@@ -28,9 +28,6 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install root dependencies
-        run: npm ci
-
       - name: Lint all services
         run: |
           for dir in services/*/ bff/ frontend/ shared/ consumers/*/; do
