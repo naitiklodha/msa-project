@@ -143,7 +143,7 @@ jobs:
               --output json)
 
             # Create new task definition with updated image + fixed config
-            # Fix: REDIS_URL to redis://, remove NODE_EXTRA_CA_CERTS, add CA bundle wrapper
+            # Fix: REDIS_URL to redis://, remove NODE_EXTRA_CA_CERTS (now baked into image)
             NEW_TD_JSON=$(echo "$TD_JSON" | jq --arg IMAGE "$IMAGE" '
               .taskDefinition
               | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
@@ -154,8 +154,6 @@ jobs:
                       elif .name=="NODE_EXTRA_CA_CERTS" then empty
                       else . end
                     )
-                  | .entryPoint = ["/bin/sh","-c"]
-                  | .command = ["set -e; apk add --no-cache curl 2>&1 | tail -5; curl -sL https://s3.amazonaws.com/rds-downloads/rds-combined-ca-bundle.pem -o /tmp/rds-ca.pem 2>&1; update-ca-certificates 2>&1; export NODE_EXTRA_CA_CERTS=/tmp/rds-ca.pem; exec /usr/local/bin/docker-entrypoint.sh node services/auth-service/src/index.js"]
                 )
             ')
 
@@ -362,8 +360,6 @@ jobs:
                     elif .name=="NODE_EXTRA_CA_CERTS" then empty
                     else . end
                   )
-                | .entryPoint = ["/bin/sh","-c"]
-                | .command = ["set -e; apk add --no-cache curl 2>&1 | tail -5; curl -sL https://s3.amazonaws.com/rds-downloads/rds-combined-ca-bundle.pem -o /tmp/rds-ca.pem 2>&1; update-ca-certificates 2>&1; export NODE_EXTRA_CA_CERTS=/tmp/rds-ca.pem; exec /usr/local/bin/docker-entrypoint.sh node services/auth-service/src/index.js"]
               )
           ')
 
