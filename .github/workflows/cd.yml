@@ -57,6 +57,7 @@ jobs:
         id: services
         run: |
           # Default services list from docker-compose
+          # Note: focuspulse-kong-service is excluded - it uses an external Kong image not built by CI
           ALL_SERVICES=(
             "auth-service"
             "game-service"
@@ -68,7 +69,6 @@ jobs:
             "room-service"
             "notification-service"
             "analytics-service"
-            "focuspulse-kong-service"
           )
 
           if [ -n "${{ github.event.inputs.services }}" ]; then
