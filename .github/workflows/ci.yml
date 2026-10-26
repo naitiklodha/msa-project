@@ -33,7 +33,7 @@ jobs:
           for dir in services/*/ bff/ frontend/ shared/ consumers/*/; do
             if [ -f "$dir/package.json" ]; then
               echo "Checking $dir"
-              (cd "$dir" && npm ci && npm run lint 2>/dev/null || echo "No lint script in $dir")
+              (cd "$dir" && npm install && npm run lint 2>/dev/null || echo "No lint script in $dir")
             fi
           done
 
@@ -86,16 +86,16 @@ jobs:
             echo "Go service, skipping npm install"
           elif [ "${{ matrix.service }}" = "leaderboard-consumer" ]; then
             cd consumers/leaderboard
-            npm ci
+            npm install
           elif [ "${{ matrix.service }}" = "frontend" ]; then
             cd frontend
-            npm ci
+            npm install
           elif [ "${{ matrix.service }}" = "bff" ]; then
             cd bff
-            npm ci
+            npm install
           else
             cd services/${{ matrix.service }}
-            npm ci
+            npm install
           fi
 
       - name: Run tests
