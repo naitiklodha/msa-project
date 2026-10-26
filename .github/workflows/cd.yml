@@ -57,7 +57,6 @@ jobs:
         id: services
         run: |
           # Default services list from docker-compose
-          # Note: focuspulse-kong-service is excluded - it uses an external Kong image not built by CI
           ALL_SERVICES=(
             "auth-service"
             "game-service"
@@ -69,6 +68,7 @@ jobs:
             "room-service"
             "notification-service"
             "analytics-service"
+            "focuspulse-kong-service"
           )
 
           if [ -n "${{ github.event.inputs.services }}" ]; then
@@ -120,7 +120,12 @@ jobs:
 
             # Get the current task definition ARN
             ECR_REPO=$(ecr_repo "$SERVICE")
-            IMAGE="${{ env.ECR_REGISTRY }}/${ECR_REPO}:${TAG}"
+            # Kong is not built by CI, use 'latest' tag instead of git SHA
+            if [ "$SERVICE" = "focuspulse-kong-service" ]; then
+              IMAGE="${{ env.ECR_REGISTRY }}/${ECR_REPO}:latest"
+            else
+              IMAGE="${{ env.ECR_REGISTRY }}/${ECR_REPO}:${TAG}"
+            fi
 
             # Get current task definition
             CURRENT_TD=$(aws ecs describe-services \
@@ -316,7 +321,12 @@ jobs:
           }
 
           ECR_REPO=$(ecr_repo "$SERVICE")
-          IMAGE="${{ env.ECR_REGISTRY }}/${ECR_REPO}:${TAG}"
+          # Kong is not built by CI, use 'latest' tag instead of git SHA
+          if [ "$SERVICE" = "focuspulse-kong-service" ]; then
+            IMAGE="${{ env.ECR_REGISTRY }}/${ECR_REPO}:latest"
+          else
+            IMAGE="${{ env.ECR_REGISTRY }}/${ECR_REPO}:${TAG}"
+          fi
 
           FORCE_FLAG=""
           if [ "$FORCE" = "true" ]; then
