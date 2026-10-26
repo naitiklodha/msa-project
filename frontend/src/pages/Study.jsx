@@ -1,22 +1,26 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { docAPI } from '../api';
-import { 
-  FileUp, 
-  BookOpen, 
-  FileText, 
-  Layers, 
-  ChevronRight, 
-  Brain, 
-  Trash2, 
-  CheckCircle2, 
+import {
+  FileUp,
+  BookOpen,
+  FileText,
+  Layers,
+  ChevronRight,
+  Brain,
+  Trash2,
+  CheckCircle2,
   Loader2,
   Library,
   Upload,
   MessageSquare,
   Send,
   X,
-  Clock
+  Clock,
+  ArrowRight,
+  Search,
+  Eye,
+  Sparkles
 } from 'lucide-react';
 import { ragAPI } from '../api';
 import Quiz from '../Quiz';
@@ -26,8 +30,8 @@ const Study = () => {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState(null);
-  const [activeQuiz, setActiveQuiz] = useState(null); // { documentId, chunkId, topicTitle }
-  const [chatDoc, setChatDoc] = useState(null); // Document currently being chatted with
+  const [activeQuiz, setActiveQuiz] = useState(null);
+  const [chatDoc, setChatDoc] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [query, setQuery] = useState('');
   const [querying, setQuerying] = useState(false);
@@ -54,11 +58,8 @@ const Study = () => {
     setUploading(true);
     try {
       const { data } = await docAPI.upload(file);
-      // Process upload also returns topics if newly processed
-      // Or just refresh the whole list
       await fetchDocs();
       if (data.document_id) {
-        // Find the new doc and select it to show topics
         const newDoc = { id: data.document_id, file_name: file.name, topics: data.topics };
         setSelectedDoc(newDoc);
       }
@@ -71,17 +72,17 @@ const Study = () => {
 
   const handleSelectDoc = async (doc) => {
     if (selectedDoc?.id === doc.id) {
-        setSelectedDoc(null);
-        return;
+      setSelectedDoc(null);
+      return;
     }
     setLoading(true);
     try {
-        const { data } = await docAPI.topics(doc.id);
-        setSelectedDoc({ ...doc, topics: data.topics });
+      const { data } = await docAPI.topics(doc.id);
+      setSelectedDoc({ ...doc, topics: data.topics });
     } catch (err) {
-        console.error('Failed to fetch topics', err);
+      console.error('Failed to fetch topics', err);
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
   };
 
@@ -100,12 +101,12 @@ const Study = () => {
   const handleChat = async (e) => {
     e.preventDefault();
     if (!query.trim() || querying) return;
-    
+
     const userMsg = { role: 'user', content: query };
     setChatMessages(prev => [...prev, userMsg]);
     setQuery('');
     setQuerying(true);
-    
+
     try {
       const { data } = await ragAPI.query(query);
       const assistantMsg = { role: 'assistant', content: data.answer };
@@ -120,212 +121,300 @@ const Study = () => {
 
   if (activeQuiz) {
     return (
-      <Quiz 
-        documentId={activeQuiz.documentId} 
-        chunkId={activeQuiz.chunkId} 
+      <Quiz
+        documentId={activeQuiz.documentId}
+        chunkId={activeQuiz.chunkId}
         topicTitle={activeQuiz.topicTitle}
-        onBack={() => setActiveQuiz(null)} 
+        onBack={() => setActiveQuiz(null)}
       />
     );
   }
 
   return (
-    <div className="space-y-8 pb-12">
+    <div className="space-y-8 pb-12 animate-fade-in animate-slide-up">
+      {/* Header */}
       <header>
-        <h1 className="font-display text-3xl font-bold text-white tracking-tight uppercase">Knowledge Library</h1>
-        <p className="font-body text-gray-400 text-sm">Upload materials to synthesize neural modules and quizzes.</p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <motion.h1
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="text-display-lg font-display font-medium tracking-tight text-fg-primary"
+            >
+              Knowledge Library
+            </motion.h1>
+            <motion.p
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="text-body-md text-fg-secondary mt-1"
+            >
+              Upload materials to synthesize neural modules and generate assessments.
+            </motion.p>
+          </div>
+        </div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Document List */}
-        <motion.div 
-          initial={{ opacity: 0, x: -20 }}
-          animate={{ opacity: 1, x: 0 }}
-          className="lg:col-span-12"
+      {/* Upload & Document Grid */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.6, delay: 0.1 }}
+        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6"
+      >
+        {/* Upload Card */}
+        <motion.label
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.4 }}
+          className="card-hover p-8 md:p-10 flex flex-col items-center justify-center border-2 border-dashed border-accent-primary/30 bg-accent-primary-dim/50 group relative overflow-hidden min-h-[280px] cursor-pointer"
+          whileHover={{ borderColor: 'var(--color-accent-primary)', backgroundColor: 'var(--color-accent-primary-dim)', scale: 1.01 }}
         >
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {/* Upload Card */}
-                <div className="glass p-8 flex flex-col items-center justify-center border-dashed border-pulse-cyan/30 bg-pulse-cyan/5 hover:bg-pulse-cyan/10 transition-all group relative overflow-hidden h-64">
-                    <input 
-                        type="file" 
-                        id="doc-upload" 
-                        className="hidden" 
-                        onChange={handleFileUpload}
-                        accept=".pdf,.doc,.docx,.txt"
-                        disabled={uploading}
-                    />
-                    <label htmlFor="doc-upload" className="flex flex-col items-center cursor-pointer">
-                        <div className="p-4 rounded-2xl bg-pulse-cyan/20 text-pulse-cyan mb-4 group-hover:scale-110 transition-transform">
-                            {uploading ? <Loader2 className="w-8 h-8 animate-spin" /> : <Upload className="w-8 h-8" />}
-                        </div>
-                        <span className="font-display text-sm font-bold text-white uppercase tracking-wider">
-                            {uploading ? 'Processing Neural Signatures...' : 'Add Neural Module'}
-                        </span>
-                        <span className="font-body text-xs text-gray-500 mt-2">Support: PDF, DOCX, TXT</span>
-                    </label>
-                </div>
+          <input
+            type="file"
+            id="doc-upload"
+            className="hidden"
+            onChange={handleFileUpload}
+            accept=".pdf,.doc,.docx,.txt"
+            disabled={uploading}
+          />
+          <div className="flex flex-col items-center text-center group-hover:scale-105 transition-transform duration-500">
+            <motion.div
+              className="p-4 rounded-2xl bg-accent-primary-dim border border-accent-primary/30 text-accent-primary mb-4"
+              animate={uploading ? { rotate: 360 } : {}}
+              transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+            >
+              {uploading ? <Loader2 className="w-8 h-8 animate-spin" /> : <Upload className="w-8 h-8" />}
+            </motion.div>
+            <span className="font-display text-sm font-bold text-fg-primary uppercase tracking-wider">
+              {uploading ? 'Processing Neural Signatures...' : 'Add Neural Module'}
+            </span>
+            <span className="text-body-sm text-fg-tertiary mt-2">Support: PDF, DOCX, TXT</span>
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="mt-4 flex items-center gap-2 text-label-sm font-medium text-accent-primary"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>Drag & drop or click to upload</span>
+            </motion.div>
+          </div>
+        </motion.label>
 
-                {documents.map((doc, i) => (
-                    <motion.div
-                        key={doc.id}
-                        initial={{ opacity: 0, scale: 0.95 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: i * 0.05 }}
-                        className={`glass p-6 glass-interactive cursor-pointer border-l-4 ${selectedDoc?.id === doc.id ? 'border-pulse-cyan' : 'border-transparent'}`}
-                        onClick={() => handleSelectDoc(doc)}
-                    >
-                        <div className="flex justify-between items-start mb-4">
-                            <div className="p-3 rounded-xl bg-cosmos-800 text-pulse-cyan">
-                                <FileText className="w-5 h-5" />
-                            </div>
-                            <div className="flex gap-2">
-                                <button 
-                                    onClick={(e) => { e.stopPropagation(); setChatDoc(doc); setChatMessages([]); }}
-                                    className="p-2 text-gray-600 hover:text-pulse-cyan transition-colors"
-                                    title="Neural Chat"
-                                >
-                                    <MessageSquare className="w-4 h-4" />
-                                </button>
-                                <button 
-                                    onClick={(e) => handleDeleteDoc(e, doc.id)} 
-                                    className="p-2 text-gray-600 hover:text-pulse-rose transition-colors"
-                                    title="Prune Module"
-                                >
-                                    <Trash2 className="w-4 h-4" />
-                                </button>
-                            </div>
-                        </div>
-                        <h3 className="font-body font-bold text-white line-clamp-1">{doc.file_name}</h3>
-                        <div className="flex justify-between items-center mt-4">
-                            <div className="flex items-center gap-1.5">
-                                <Layers className="w-3.5 h-3.5 text-gray-500" />
-                                <span className="text-[10px] font-display font-medium text-gray-400 uppercase tracking-widest">Aggregate Blocks</span>
-                            </div>
-                            <span className="text-[10px] font-body bg-white/5 px-2 py-1 rounded text-gray-400">
-                                {new Date(doc.created_at).toLocaleDateString()}
-                            </span>
-                        </div>
-                    </motion.div>
-                ))}
-            </div>
-        </motion.div>
-
-        {/* Selected Doc Details (Topics) */}
-        <AnimatePresence>
-            {selectedDoc && (
-                <motion.div 
-                    initial={{ opacity: 0, y: 20, height: 0 }}
-                    animate={{ opacity: 1, y: 0, height: 'auto' }}
-                    exit={{ opacity: 0, y: 20, height: 0 }}
-                    className="lg:col-span-12 overflow-hidden"
+        {/* Document Cards */}
+        {documents.map((doc, i) => (
+          <motion.div
+            key={doc.id}
+            initial={{ opacity: 0, scale: 0.95, y: 16 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: i * 0.05, ease: [0.16, 1, 0.3, 1] }}
+            className={`card-hover p-6 flex flex-col ${selectedDoc?.id === doc.id ? 'border-accent-primary/50 shadow-glow-primary' : ''}`}
+            onClick={() => handleSelectDoc(doc)}
+          >
+            <div className="flex justify-between items-start mb-4">
+              <div className="p-3 rounded-xl bg-accent-primary-dim border border-accent-primary/30 text-accent-primary">
+                <FileText className="w-5 h-5" />
+              </div>
+              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-fast">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setChatDoc(doc); setChatMessages([]); }}
+                  className="p-2 rounded-lg text-fg-tertiary hover:text-accent-primary hover:bg-accent-primary-dim transition-colors"
+                  title="Neural Chat"
+                  aria-label="Neural Chat"
                 >
-                    <div className="glass p-8 space-y-8 aurora-border">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                                <div className="p-3 rounded-xl bg-pulse-cyan text-cosmos-950">
-                                    <Brain className="w-6 h-6" />
-                                </div>
-                                <div>
-                                    <h2 className="font-display text-xl font-bold text-white uppercase tracking-widest">{selectedDoc.file_name}</h2>
-                                    <p className="font-body text-xs text-pulse-cyan">Neural Breakdown Complete • {selectedDoc.topics?.length || 0} Modules Detected</p>
-                                </div>
-                            </div>
-                            <button onClick={() => setSelectedDoc(null)} className="btn-ghost">Close View</button>
-                        </div>
+                  <MessageSquare className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={(e) => handleDeleteDoc(e, doc.id)}
+                  className="p-2 rounded-lg text-fg-tertiary hover:text-semantic-danger hover:bg-semantic-danger-dim transition-colors"
+                  title="Prune Module"
+                  aria-label="Delete Document"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <h3 className="font-display font-semibold text-fg-primary line-clamp-1 mb-2 flex-1">{doc.file_name}</h3>
+            <div className="flex justify-between items-center pt-4 border-t border-border-primary">
+              <div className="flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-fg-tertiary" />
+                <span className="text-label-sm font-display font-medium text-fg-tertiary uppercase tracking-wider">Blocks</span>
+              </div>
+              <span className="text-label-sm font-body text-fg-tertiary">
+                {new Date(doc.created_at).toLocaleDateString()}
+              </span>
+            </div>
+          </motion.div>
+        ))}
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {selectedDoc.topics && selectedDoc.topics.map((topic, i) => (
-                                <div key={i} className="p-5 glass-sm border-white/[0.03] hover:border-white/[0.1] transition-all group">
-                                    <div className="flex justify-between items-start mb-3">
-                                        <span className="text-[10px] font-display font-bold text-pulse-amber uppercase tracking-widest">Module {i + 1}</span>
-                                        <div className="flex items-center gap-1 text-[10px] text-gray-500">
-                                            <Clock className="w-3 h-3" />
-                                            ~{Math.ceil(topic.time_est_s / 60)}m
-                                        </div>
-                                    </div>
-                                    <h4 className="font-body font-bold text-gray-200 mb-4">{topic.topic}</h4>
-                                    <button 
-                                        onClick={() => setActiveQuiz({ documentId: selectedDoc.id, chunkId: topic.chunk_id, topicTitle: topic.topic })}
-                                        className="flex items-center justify-center gap-2 w-full py-2 bg-pulse-cyan/10 hover:bg-pulse-cyan/20 text-pulse-cyan border border-pulse-cyan/20 rounded-lg text-xs font-display font-bold uppercase transition-all"
-                                    >
-                                        Initiate Quiz
-                                        <ChevronRight className="w-4 h-4" />
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
+        {documents.length === 0 && !uploading && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="col-span-full card p-16 md:p-24 text-center"
+          >
+            <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-accent-tertiary-dim border border-accent-tertiary/30 flex items-center justify-center text-accent-tertiary">
+              <Library className="w-10 h-10" />
+            </div>
+            <h3 className="text-heading-lg font-display font-bold text-fg-primary mb-2">Library Empty</h3>
+            <p className="text-body-md text-fg-secondary max-w-md mx-auto mb-6">
+              No neural modules detected. Upload your first document to begin synthesis.
+            </p>
+            <label htmlFor="doc-upload" className="btn-primary inline-flex items-center gap-2 cursor-pointer">
+              <Upload className="w-4 h-4" />
+              <span>Upload First Module</span>
+            </label>
+          </motion.div>
+        )}
+      </motion.div>
+
+      {/* Selected Doc Details (Topics) */}
+      <AnimatePresence>
+        {selectedDoc && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, height: 0 }}
+            animate={{ opacity: 1, y: 0, height: 'auto' }}
+            exit={{ opacity: 0, y: 20, height: 0 }}
+            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+            className="space-y-6"
+          >
+            <div className="card p-6 md:p-8">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 rounded-xl bg-accent-secondary-dim border border-accent-secondary/30 text-accent-secondary">
+                    <Brain className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-heading-lg font-display font-bold text-fg-primary uppercase tracking-wider">{selectedDoc.file_name}</h2>
+                    <p className="text-label-sm text-accent-tertiary uppercase tracking-wider mt-1">Neural Breakdown Complete • {selectedDoc.topics?.length || 0} Modules Detected</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setSelectedDoc(null)}
+                  className="btn-ghost whitespace-nowrap"
+                >
+                  <X className="w-4 h-4 mr-1" />
+                  Close View
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {selectedDoc.topics && selectedDoc.topics.map((topic, i) => (
+                  <motion.div
+                    key={topic.chunk_id || i}
+                    initial={{ opacity: 0, y: 16, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ duration: 0.3, delay: i * 0.04, ease: [0.16, 1, 0.3, 1] }}
+                    className="card p-5"
+                  >
+                    <div className="flex justify-between items-start mb-3">
+                      <span className="text-label-sm font-display font-bold text-accent-secondary uppercase tracking-wider">Module {i + 1}</span>
+                      <div className="flex items-center gap-1 text-label-sm text-fg-tertiary">
+                        <Clock className="w-3.5 h-3.5" />
+                        ~{Math.ceil(topic.time_est_s / 60)}m
+                      </div>
                     </div>
-                </motion.div>
-            )}
-        </AnimatePresence>
-      </div>
+                    <h4 className="font-display font-semibold text-fg-primary mb-4 line-clamp-2">{topic.topic}</h4>
+                    <motion.button
+                      onClick={() => setActiveQuiz({ documentId: selectedDoc.id, chunkId: topic.chunk_id, topicTitle: topic.topic })}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="btn-secondary w-full flex items-center justify-center gap-2"
+                    >
+                      Initiate Quiz
+                      <ChevronRight className="w-4 h-4" />
+                    </motion.button>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Neural Chat Drawer */}
       <AnimatePresence>
         {chatDoc && (
-            <>
-                <motion.div 
-                    initial={{ opacity: 0 }} 
-                    animate={{ opacity: 1 }} 
-                    exit={{ opacity: 0 }}
-                    onClick={() => setChatDoc(null)}
-                    className="fixed inset-0 bg-cosmos-950/60 backdrop-blur-sm z-[60]"
-                />
-                <motion.div
-                    initial={{ x: '100%' }}
-                    animate={{ x: 0 }}
-                    exit={{ x: '100%' }}
-                    transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-                    className="fixed top-0 right-0 h-full w-full max-w-lg bg-cosmos-900 border-l border-white/10 z-[70] shadow-2xl flex flex-col"
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setChatDoc(null)}
+              className="fixed inset-0 bg-bg-overlay backdrop-blur-sm z-[60]"
+            />
+            <motion.div
+              initial={{ x: '100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed top-0 right-0 h-full w-full max-w-lg bg-bg-elevated border-l border-border-primary z-[70] shadow-elevation-4 flex flex-col"
+            >
+              <div className="p-5 border-b border-border-primary flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-accent-primary-dim border border-accent-primary/30 text-accent-primary">
+                    <MessageSquare className="w-5 h-5" />
+                  </div>
+                  <h3 className="text-heading-sm font-display font-bold text-fg-primary uppercase tracking-wider">Neural Uplink: {chatDoc.file_name}</h3>
+                </div>
+                <button
+                  onClick={() => setChatDoc(null)}
+                  className="p-2 rounded-lg text-fg-tertiary hover:text-fg-primary hover:bg-bg-tertiary transition-colors focus-ring"
+                  aria-label="Close Chat"
                 >
-                    <div className="p-6 border-b border-white/5 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <div className="p-2 rounded-lg bg-pulse-cyan/10 text-pulse-cyan">
-                                <MessageSquare className="w-5 h-5" />
-                            </div>
-                            <h3 className="font-display font-bold text-white uppercase tracking-widest text-sm">Neural Uplink: {chatDoc.file_name}</h3>
-                        </div>
-                        <button onClick={() => setChatDoc(null)} className="p-2 text-gray-500 hover:text-white transition-colors">
-                            <X className="w-6 h-6" />
-                        </button>
-                    </div>
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
 
-                    <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-hide">
-                        {chatMessages.length === 0 && (
-                            <div className="flex flex-col items-center justify-center h-full text-center opacity-20">
-                                <Brain className="w-16 h-16 mb-4" />
-                                <p className="font-display text-xs uppercase tracking-[0.2em] max-w-[200px]">Awaiting inquiry parameters...</p>
-                            </div>
-                        )}
-                        {chatMessages.map((msg, i) => (
-                            <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                                <div className={`max-w-[85%] p-4 rounded-2xl text-sm ${msg.role === 'user' ? 'bg-pulse-cyan text-cosmos-950 font-bold' : 'bg-white/5 text-gray-300 border border-white/5'}`}>
-                                    {msg.content}
-                                </div>
-                            </div>
-                        ))}
+              <div className="flex-1 overflow-y-auto p-5 space-y-5">
+                {chatMessages.length === 0 && (
+                  <div className="flex flex-col items-center justify-center h-full text-center text-fg-tertiary/50">
+                    <Brain className="w-16 h-16 mb-4" />
+                    <p className="text-label-sm font-display font-bold uppercase tracking-wider max-w-[200px]">Awaiting inquiry parameters...</p>
+                  </div>
+                )}
+                {chatMessages.map((msg, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, y: 16 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.3, delay: i * 0.05 }}
+                    className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
+                  >
+                    <div className={`max-w-[85%] p-4 rounded-2xl text-body-sm ${
+                      msg.role === 'user'
+                        ? 'bg-accent-primary text-fg-inverse font-semibold'
+                        : 'bg-bg-tertiary text-fg-secondary border border-border-primary'
+                    }`}>
+                      {msg.content}
                     </div>
+                  </motion.div>
+                ))}
+              </div>
 
-                    <form onSubmit={handleChat} className="p-6 border-t border-white/5 bg-cosmos-950/50">
-                        <div className="relative">
-                            <input 
-                                type="text"
-                                placeholder="Query neural patterns..."
-                                value={query}
-                                onChange={(e) => setQuery(e.target.value)}
-                                className="input-opalite pr-14 text-sm"
-                            />
-                            <button 
-                                type="submit"
-                                disabled={querying || !query.trim()}
-                                className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-pulse-cyan text-cosmos-950 rounded-lg hover:shadow-[0_0_15px_rgba(34,211,238,0.4)] transition-all disabled:opacity-50"
-                            >
-                                {querying ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-                            </button>
-                        </div>
-                    </form>
-                </motion.div>
-            </>
+              <form onSubmit={handleChat} className="p-5 border-t border-border-primary bg-bg-secondary/50">
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Query neural patterns..."
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    className="input pr-14"
+                    disabled={querying}
+                  />
+                  <button
+                    type="submit"
+                    disabled={querying || !query.trim()}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-lg bg-accent-primary text-fg-inverse hover:shadow-glow-primary transition-all disabled:opacity-50 focus-ring"
+                    aria-label="Send Query"
+                  >
+                    {querying ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
     </div>

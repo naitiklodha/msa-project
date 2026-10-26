@@ -1,17 +1,18 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { quizAPI } from './api';
-import { 
-  ChevronLeft, 
-  ChevronRight, 
-  Timer, 
-  BrainCircuit, 
-  CheckCircle2, 
-  XCircle, 
+import {
+  ChevronLeft,
+  ChevronRight,
+  Timer,
+  BrainCircuit,
+  CheckCircle2,
+  XCircle,
   RotateCcw,
   Trophy,
   Loader2,
-  Sparkles
+  Sparkles,
+  ArrowRight
 } from 'lucide-react';
 
 const Quiz = ({ documentId, chunkId, topicTitle, onBack, isRoomQuiz = false, roomCode = null }) => {
@@ -21,7 +22,7 @@ const Quiz = ({ documentId, chunkId, topicTitle, onBack, isRoomQuiz = false, roo
   const [submitting, setSubmitting] = useState(false);
   const [completed, setCompleted] = useState(false);
   const [selectedOption, setSelectedOption] = useState(null);
-  const [feedback, setFeedback] = useState(null); // { correct: bool, message: string }
+  const [feedback, setFeedback] = useState(null);
   const [stats, setStats] = useState({ correct: 0, total: 0, score: 0, duration: 0, speed_bonus: 0 });
   const [questionCount, setQuestionCount] = useState(0);
 
@@ -69,7 +70,7 @@ const Quiz = ({ documentId, chunkId, topicTitle, onBack, isRoomQuiz = false, roo
     setSubmitting(true);
 
     const isCorrect = option === currentQuestion.answer;
-    
+
     try {
       await quizAPI.submit(sessionId, currentQuestion.id, isCorrect);
       setFeedback({
@@ -85,7 +86,6 @@ const Quiz = ({ documentId, chunkId, topicTitle, onBack, isRoomQuiz = false, roo
       console.error('Failed to submit answer', err);
     } finally {
       setSubmitting(false);
-      // Auto-advance logic
       setTimeout(() => {
         fetchNextQuestion();
       }, 1500);
@@ -113,172 +113,256 @@ const Quiz = ({ documentId, chunkId, topicTitle, onBack, isRoomQuiz = false, roo
 
   if (loading && !currentQuestion && !completed) {
     return (
-      <div className="flex flex-col items-center justify-center py-40 gap-6">
-        <Loader2 className="w-12 h-12 text-pulse-cyan animate-spin" />
-        <span className="font-display text-sm text-gray-500 uppercase tracking-[0.3em] animate-pulse">Syncing Neural Chunks...</span>
+      <div className="flex flex-col items-center justify-center py-20 gap-4">
+        <motion.div
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+          className="w-12 h-12 text-accent-primary"
+        >
+          <Loader2 className="w-12 h-12" />
+        </motion.div>
+        <span className="text-label-sm font-display font-bold uppercase tracking-wider text-fg-tertiary animate-pulse">Syncing Neural Chunks...</span>
       </div>
     );
   }
 
   if (completed) {
     return (
-      <motion.div 
-        initial={{ opacity: 0, scale: 0.95 }}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.96 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="max-w-2xl mx-auto glass p-12 text-center space-y-8 aurora-border"
+        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+        className="max-w-2xl mx-auto card-glass p-8 md:p-12 text-center space-y-8"
       >
-        <div className="flex justify-center">
-            <div className="w-24 h-24 bg-gradient-to-tr from-pulse-cyan to-pulse-mint rounded-3xl flex items-center justify-center shadow-[0_0_40px_rgba(34,211,238,0.4)]">
-                <Trophy className="w-12 h-12 text-cosmos-950" />
-            </div>
-        </div>
+        <motion.div
+          initial={{ scale: 0.8 }}
+          animate={{ scale: 1 }}
+          transition={{ type: 'spring', damping: 15, stiffness: 150 }}
+          className="w-20 h-20 mx-auto mb-4 bg-gradient-to-br from-accent-secondary to-accent-primary rounded-2xl flex items-center justify-center shadow-glow-secondary"
+        >
+          <Trophy className="w-10 h-10 text-fg-inverse" />
+        </motion.div>
 
         <div className="space-y-2">
-            <h2 className="font-display text-3xl font-bold text-white uppercase tracking-tight">Sync Complete</h2>
-            <p className="font-body text-gray-400">Neural retention patterns recorded successfully.</p>
+          <motion.h2
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-heading-lg font-display font-bold text-fg-primary uppercase tracking-tight"
+          >
+            Sync Complete
+          </motion.h2>
+          <motion.p
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="text-body-md text-fg-secondary"
+          >
+            Neural retention patterns recorded successfully.
+          </motion.p>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="p-6 glass-sm">
-                <span className="stat-label">Retention</span>
-                <div className="stat-value text-white mt-1">{Math.round((stats.correct / (stats.total || 1)) * 100)}%</div>
-            </div>
-            <div className="p-6 glass-sm">
-                <span className="stat-label">Sync Speed</span>
-                <div className="stat-value text-pulse-amber mt-1">{stats.duration}s</div>
-            </div>
-            <div className="p-6 glass-sm">
-                <span className="stat-label">Speed Bonus</span>
-                <div className="stat-value text-pulse-cyan mt-1">+{stats.speed_bonus}</div>
-            </div>
-            <div className="p-6 glass-sm border-pulse-mint/20">
-                <span className="stat-label">Total Flux</span>
-                <div className="stat-value text-pulse-mint mt-1">+{stats.score}</div>
-            </div>
-        </div>
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="grid grid-cols-2 lg:grid-cols-4 gap-3"
+        >
+          <div className="card p-5">
+            <span className="text-label-sm font-display font-bold text-fg-tertiary uppercase tracking-wider">Retention</span>
+            <div className="text-display-sm font-display font-bold text-fg-primary mt-1">{Math.round((stats.correct / (stats.total || 1)) * 100)}%</div>
+          </div>
+          <div className="card p-5">
+            <span className="text-label-sm font-display font-bold text-fg-tertiary uppercase tracking-wider">Sync Speed</span>
+            <div className="text-display-sm font-display font-bold text-accent-secondary mt-1">{stats.duration}s</div>
+          </div>
+          <div className="card p-5">
+            <span className="text-label-sm font-display font-bold text-fg-tertiary uppercase tracking-wider">Speed Bonus</span>
+            <div className="text-display-sm font-display font-bold text-accent-tertiary mt-1">+{stats.speed_bonus}</div>
+          </div>
+          <div className="card p-5 border-accent-tertiary/30">
+            <span className="text-label-sm font-display font-bold text-fg-tertiary uppercase tracking-wider">Total Flux</span>
+            <div className="text-display-sm font-display font-bold text-accent-tertiary mt-1">+{stats.score}</div>
+          </div>
+        </motion.div>
 
-        <div className="flex gap-4 pt-4">
-            <button 
-                onClick={() => window.location.reload()} 
-                className="btn-ghost flex-1 py-4"
-            >
-                Exit Terminal
-            </button>
-            <button onClick={startQuiz} className="btn-primary flex-1 py-4 flex items-center justify-center gap-2">
-                <RotateCcw className="w-4 h-4" />
-                Retrain
-            </button>
-        </div>
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="flex gap-3 pt-4"
+        >
+          <motion.button
+            onClick={onBack}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="btn-ghost flex-1"
+          >
+            Exit Terminal
+          </motion.button>
+          <motion.button
+            onClick={startQuiz}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            className="btn-primary flex-1 flex items-center justify-center gap-2"
+          >
+            <RotateCcw className="w-4 h-4" />
+            <span>Retrain</span>
+          </motion.button>
+        </motion.div>
       </motion.div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
+    <div className="max-w-3xl mx-auto space-y-6 animate-fade-in animate-slide-up">
       <header className="flex items-center justify-between">
-        <button onClick={onBack} className="flex items-center gap-2 text-gray-400 hover:text-white transition-colors group">
-            <ChevronLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
-            <span className="font-display text-xs font-bold uppercase tracking-widest">Back to Library</span>
-        </button>
-        <div className="flex items-center gap-4">
-            <div className="glass-sm px-4 py-2 flex items-center gap-2">
-                <Timer className="w-4 h-4 text-pulse-amber" />
-                <span className="font-display text-xs font-bold text-white">Question {stats.total + 1} / {questionCount}</span>
-            </div>
+        <motion.button
+          onClick={onBack}
+          whileHover={{ x: -4 }}
+          whileTap={{ scale: 0.98 }}
+          className="btn-ghost flex items-center gap-2"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          <span className="text-label-sm font-display font-bold uppercase tracking-wider">Back</span>
+        </motion.button>
+        <div className="flex items-center gap-3">
+          <div className="badge badge-primary flex items-center gap-2">
+            <Timer className="w-3.5 h-3.5" />
+            <span>Question {stats.total + 1} / {questionCount}</span>
+          </div>
         </div>
       </header>
 
-      <div className="space-y-6">
-        <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-pulse-cyan/10 text-pulse-cyan">
-                <BrainCircuit className="w-5 h-5" />
-            </div>
-            <h2 className="font-body text-gray-400 text-sm italic">{topicTitle}</h2>
+      <motion.div
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex items-center gap-3"
+      >
+        <div className="w-10 h-10 rounded-xl bg-accent-primary-dim border border-accent-primary/30 flex items-center justify-center text-accent-primary">
+          <BrainCircuit className="w-5 h-5" />
         </div>
+        <h2 className="text-body-md text-fg-secondary italic">{topicTitle}</h2>
+      </motion.div>
 
-        <AnimatePresence mode='wait'>
-            <motion.div 
-                key={currentQuestion?.id}
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className="glass p-8 lg:p-12 space-y-12"
-            >
-                <h3 className="font-display text-2xl lg:text-3xl font-bold text-white leading-tight">
-                    {currentQuestion?.question}
-                </h3>
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={currentQuestion?.id}
+          initial={{ opacity: 0, x: 20 }}
+          animate={{ opacity: 1, x: 0 }}
+          exit={{ opacity: 0, x: -20 }}
+          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          className="card p-6 md:p-8 space-y-8"
+        >
+          <motion.h3
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-heading-lg md:text-heading-xl font-display font-medium tracking-tight text-fg-primary leading-snug"
+          >
+            {currentQuestion?.question}
+          </motion.h3>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {currentQuestion?.options.map((option, i) => {
-                        const isSelected = selectedOption === option;
-                        const isCorrect = option === currentQuestion.answer;
-                        let borderClass = 'border-white/[0.08]';
-                        let bgClass = 'bg-cosmos-800/40';
-                        
-                        if (feedback) {
-                            if (isCorrect) {
-                                borderClass = 'border-pulse-mint ring-1 ring-pulse-mint/20';
-                                bgClass = 'bg-pulse-mint/10';
-                            } else if (isSelected) {
-                                borderClass = 'border-pulse-rose ring-1 ring-pulse-rose/20';
-                                bgClass = 'bg-pulse-rose/10';
-                            }
-                        } else if (isSelected) {
-                            borderClass = 'border-pulse-cyan ring-1 ring-pulse-cyan/20';
-                            bgClass = 'bg-pulse-cyan/5';
-                        }
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="grid grid-cols-1 md:grid-cols-2 gap-3"
+          >
+            {currentQuestion?.options.map((option, i) => {
+              const isSelected = selectedOption === option;
+              const isCorrect = option === currentQuestion.answer;
+              let variant = 'ghost';
 
-                        return (
-                            <button
-                                key={i}
-                                disabled={!!feedback || submitting}
-                                onClick={() => handleOptionSelect(option)}
-                                className={`p-6 border rounded-2xl text-left transition-all duration-300 relative group overflow-hidden ${borderClass} ${bgClass} ${feedback ? '' : 'hover:border-white/20 hover:bg-white/[0.02]'}`}
-                            >
-                                <div className="flex items-center justify-between relative z-10">
-                                    <span className="font-body text-gray-200">{option}</span>
-                                    {feedback && isCorrect && <CheckCircle2 className="w-5 h-5 text-pulse-mint shrink-0" />}
-                                    {feedback && isSelected && !isCorrect && <XCircle className="w-5 h-5 text-pulse-rose shrink-0" />}
-                                </div>
-                                {isSelected && !feedback && (
-                                    <motion.div layoutId="choice-glow" className="absolute inset-0 bg-pulse-cyan/5" />
-                                )}
-                            </button>
-                        );
-                    })}
-                </div>
+              if (feedback) {
+                if (isCorrect) variant = 'success';
+                else if (isSelected) variant = 'danger';
+              } else if (isSelected) variant = 'primary';
 
-                <div className="h-20 flex items-center justify-center">
-                    <AnimatePresence>
-                        {feedback && (
-                            <motion.div 
-                                initial={{ opacity: 0, y: 10 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className="flex flex-col items-center gap-4"
-                            >
-                                <p className={`font-display text-sm font-bold uppercase tracking-widest ${feedback.correct ? 'text-pulse-mint' : 'text-pulse-rose'}`}>
-                                    {feedback.message}
-                                </p>
-                                <button onClick={() => fetchNextQuestion()} className="btn-primary px-8 py-3 flex items-center gap-2">
-                                    Continue Frequency
-                                    <ChevronRight className="w-4 h-4" />
-                                </button>
-                            </motion.div>
-                        )}
-                    </AnimatePresence>
-                </div>
-            </motion.div>
-        </AnimatePresence>
-      </div>
+              return (
+                <motion.button
+                  key={i}
+                  disabled={!!feedback || submitting}
+                  onClick={() => handleOptionSelect(option)}
+                  whileHover={!feedback && !submitting ? { scale: 1.01 } : {}}
+                  whileTap={!feedback && !submitting ? { scale: 0.98 } : {}}
+                  className={`btn-${variant} w-full text-left justify-start gap-3 ${feedback ? 'animate-none' : ''}`}
+                >
+                  <span className="font-display font-medium text-fg-primary flex-1">{option}</span>
+                  <AnimatePresence>
+                    {feedback && isCorrect && (
+                      <motion.div
+                        initial={{ scale: 0, rotate: -180 }}
+                        animate={{ scale: 1, rotate: 0 }}
+                        transition={{ type: 'spring', damping: 12, stiffness: 150 }}
+                        className="text-semantic-success"
+                      >
+                        <CheckCircle2 className="w-5 h-5" />
+                      </motion.div>
+                    )}
+                    {feedback && isSelected && !isCorrect && (
+                      <motion.div
+                        initial={{ scale: 0, rotate: 180 }}
+                        animate={{ scale: 1, rotate: 0 }}
+                        transition={{ type: 'spring', damping: 12, stiffness: 150 }}
+                        className="text-semantic-danger"
+                      >
+                        <XCircle className="w-5 h-5" />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.button>
+              );
+            })}
+          </motion.div>
 
-      <div className="flex justify-center gap-2">
+          <AnimatePresence>
+            {feedback && (
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -16 }}
+                className="flex flex-col items-center gap-3 pt-4 border-t border-border-primary"
+              >
+                <motion.p
+                  initial={{ scale: 0.9 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: 'spring', damping: 12, stiffness: 150 }}
+                  className={`font-display text-label-md font-bold uppercase tracking-wider ${feedback.correct ? 'text-semantic-success' : 'text-semantic-danger'}`}
+                >
+                  {feedback.message}
+                </motion.p>
+                <motion.button
+                  onClick={() => fetchNextQuestion()}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="btn-primary flex items-center gap-2"
+                >
+                  Continue
+                  <ChevronRight className="w-4 h-4" />
+                </motion.button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </motion.div>
+      </AnimatePresence>
+
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.3 }}
+        className="flex justify-center gap-1.5"
+      >
         {Array.from({ length: questionCount }).map((_, i) => (
-            <div 
-                key={i} 
-                className={`h-1 rounded-full transition-all duration-500 ${i === stats.total ? 'w-8 bg-pulse-cyan ring-4 ring-pulse-cyan/20' : i < stats.total ? 'w-4 bg-pulse-mint' : 'w-4 bg-white/10'}`} 
-            />
+          <motion.div
+            key={i}
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ delay: i * 0.05, type: 'spring', damping: 15, stiffness: 150 }}
+            className={`rounded-full transition-all duration-300 ${
+              i === stats.total ? 'w-8 bg-accent-primary' : i < stats.total ? 'w-3 bg-accent-tertiary' : 'w-3 bg-border-primary'
+            }`}
+          />
         ))}
-      </div>
+      </motion.div>
     </div>
   );
 };
