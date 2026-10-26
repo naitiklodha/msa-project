@@ -142,12 +142,21 @@ jobs:
               --region ${{ env.AWS_REGION }} \
               --output json)
 
-            # Create new task definition with updated image
-            # Extract container definitions and update the image
+            # Create new task definition with updated image + fixed config
+            # Fix: REDIS_URL to redis://, remove NODE_EXTRA_CA_CERTS, add CA bundle wrapper
             NEW_TD_JSON=$(echo "$TD_JSON" | jq --arg IMAGE "$IMAGE" '
               .taskDefinition
               | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
-              | .containerDefinitions[] |= (if .image | contains("'${{ env.ECR_REGISTRY }}'") then .image = $IMAGE else . end)
+              | .containerDefinitions[] |= (
+                  (if .image | contains("'${{ env.ECR_REGISTRY }}'") then .image = $IMAGE else . end)
+                  | .environment |= map(
+                      if .name=="REDIS_URL" then .value="redis://focuspulse-cache-ji5gw7.serverless.aps1.cache.amazonaws.com:6379"
+                      elif .name=="NODE_EXTRA_CA_CERTS" then empty
+                      else . end
+                    )
+                  | .entryPoint = ["/bin/sh","-c"]
+                  | .command = ["set -e; apk add --no-cache curl 2>&1 | tail -5; curl -sL https://s3.amazonaws.com/rds-downloads/rds-combined-ca-bundle.pem -o /tmp/rds-ca.pem 2>&1; update-ca-certificates 2>&1; export NODE_EXTRA_CA_CERTS=/tmp/rds-ca.pem; exec /usr/local/bin/docker-entrypoint.sh node services/auth-service/src/index.js"]
+                )
             ')
 
             # Register new task definition
@@ -342,11 +351,20 @@ jobs:
             --region ${{ env.AWS_REGION }} \
             --output json)
 
-          # Create new task definition with updated image
+          # Create new task definition with updated image + fixed config
           NEW_TD_JSON=$(echo "$TD_JSON" | jq --arg IMAGE "$IMAGE" '
             .taskDefinition
             | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
-            | .containerDefinitions[] |= (if .image | contains("'${{ env.ECR_REGISTRY }}'") then .image = $IMAGE else . end)
+            | .containerDefinitions[] |= (
+                (if .image | contains("'${{ env.ECR_REGISTRY }}'") then .image = $IMAGE else . end)
+                | .environment |= map(
+                    if .name=="REDIS_URL" then .value="redis://focuspulse-cache-ji5gw7.serverless.aps1.cache.amazonaws.com:6379"
+                    elif .name=="NODE_EXTRA_CA_CERTS" then empty
+                    else . end
+                  )
+                | .entryPoint = ["/bin/sh","-c"]
+                | .command = ["set -e; apk add --no-cache curl 2>&1 | tail -5; curl -sL https://s3.amazonaws.com/rds-downloads/rds-combined-ca-bundle.pem -o /tmp/rds-ca.pem 2>&1; update-ca-certificates 2>&1; export NODE_EXTRA_CA_CERTS=/tmp/rds-ca.pem; exec /usr/local/bin/docker-entrypoint.sh node services/auth-service/src/index.js"]
+              )
           ')
 
           # Register new task definition
