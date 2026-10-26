@@ -98,7 +98,7 @@ const Login = () => {
                             <label className="text-[10px] font-display font-bold text-gray-500 uppercase tracking-[0.2em] ml-6">Identifier</label>
                             <input 
                                 type="email" 
-                                placeholder="commander@sector.opalite"
+                                placeholder="commander@sector.focuspulse"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 className="input-premium"
