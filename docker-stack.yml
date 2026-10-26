@@ -69,6 +69,7 @@ services:
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_ROUTER_FLAVOR: traditional
       KONG_CORS_ORIGIN: ${KONG_CORS_ORIGIN:-http://localhost:8002}
       JWT_SECRET: ${JWT_SECRET}
       AUTH_SERVICE_URL: http://auth-service:${AUTH_SERVICE_PORT}

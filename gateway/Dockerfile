@@ -17,6 +17,12 @@ USER kong
 # Expose Kong ports
 EXPOSE 8000 8443 8001 8444
 
+# Use the traditional router: Kong 3.4's default (traditional_compatible /
+# atc-router) rejects the look-ahead regexes used for the /health/* public
+# routes. The traditional router supports them and preserves correct
+# strip_path behavior (strips /analytics, forwards /health/live).
+ENV KONG_ROUTER_FLAVOR=traditional
+
 # Use custom entrypoint that processes template with envsubst
 ENTRYPOINT ["/kong-entrypoint.sh"]
 CMD ["kong", "docker-start"]

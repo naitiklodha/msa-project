@@ -61,8 +61,7 @@ services:
     routes:
       - name: game-public
         paths:
-          - /game/health/live
-          - /game/health/ready
+          - "~/game(?=/health/(?:live|ready)$)"
           - /game/metrics
       - name: game-protected
         paths:
@@ -103,8 +102,7 @@ services:
     routes:
       - name: timer-public
         paths:
-          - /timer/health/live
-          - /timer/health/ready
+          - "~/timer(?=/health/(?:live|ready)$)"
           - /timer/metrics
       - name: timer-protected
         paths:
@@ -142,8 +140,7 @@ services:
     routes:
       - name: bff-public
         paths:
-          - /api/health/live
-          - /api/health/ready
+          - "~/api(?=/health/(?:live|ready)$)"
           - /api/metrics
       - name: bff-dashboard
         paths:
@@ -207,8 +204,7 @@ services:
     routes:
       - name: analytics-public
         paths:
-          - /analytics/health/live
-          - /analytics/health/ready
+          - "~/analytics(?=/health/(?:live|ready)$)"
       - name: analytics-protected
         paths:
           - /analytics
