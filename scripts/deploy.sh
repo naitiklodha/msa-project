@@ -30,6 +30,24 @@ SERVICES=(
   "focuspulse-kong-service"
 )
 
+# Map service name to ECR repository name
+ecr_repo() {
+  case "$1" in
+    auth-service) echo "focuspulse-auth" ;;
+    game-service) echo "focuspulse-game" ;;
+    timer-service) echo "focuspulse-timer" ;;
+    rag-service) echo "focuspulse-rag" ;;
+    bff) echo "focuspulse-bff" ;;
+    frontend) echo "focuspulse-frontend" ;;
+    leaderboard-service) echo "focuspulse-leaderboard" ;;
+    room-service) echo "focuspulse-room" ;;
+    notification-service) echo "focuspulse-notification" ;;
+    analytics-service) echo "focuspulse-analytics" ;;
+    focuspulse-kong-service) echo "focuspulse-kong" ;;
+    *) echo "focuspulse-$1" ;;
+  esac
+}
+
 # Helper functions
 log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
 log_success() { echo -e "${GREEN}[SUCCESS]${NC} $*"; }
@@ -97,9 +115,10 @@ deploy_service() {
 
   local image
   if [ "$service" = "focuspulse-kong-service" ]; then
-    image="${ECR_REGISTRY}/${ECR_REPOSITORY_PREFIX}/kong:3.4"
+    image="${ECR_REGISTRY}/focuspulse-kong:3.4"
   else
-    image="${ECR_REGISTRY}/${ECR_REPOSITORY_PREFIX}/${service}:${tag}"
+    local repo=$(ecr_repo "$service")
+    image="${ECR_REGISTRY}/${repo}:${tag}"
   fi
 
   log_info "Deploying $service with image $image"
@@ -280,8 +299,9 @@ main() {
           continue
         fi
         echo "--- $service ---"
+        local repo=$(ecr_repo "$service")
         aws ecr describe-images \
-          --repository-name "${ECR_REPOSITORY_PREFIX}/${service}" \
+          --repository-name "$repo" \
           --region "$AWS_REGION" \
           --query 'sort_by(imageDetails, &imagePushedAt)[-5:].{tags:imageTags, pushedAt:imagePushedAt, size:imageSizeInBytes}' \
           --output table 2>/dev/null || log_warning "Repository not found or no images"

@@ -63,6 +63,24 @@ jobs:
         with:
           path: .
 
+      - name: Set ECR repo name
+        id: ecr-repo
+        run: |
+          case "${{ matrix.service }}" in
+            auth-service) echo "repo=focuspulse-auth" >> $GITHUB_OUTPUT ;;
+            game-service) echo "repo=focuspulse-game" >> $GITHUB_OUTPUT ;;
+            timer-service) echo "repo=focuspulse-timer" >> $GITHUB_OUTPUT ;;
+            rag-service) echo "repo=focuspulse-rag" >> $GITHUB_OUTPUT ;;
+            bff) echo "repo=focuspulse-bff" >> $GITHUB_OUTPUT ;;
+            frontend) echo "repo=focuspulse-frontend" >> $GITHUB_OUTPUT ;;
+            leaderboard-service) echo "repo=focuspulse-leaderboard" >> $GITHUB_OUTPUT ;;
+            room-service) echo "repo=focuspulse-room" >> $GITHUB_OUTPUT ;;
+            notification-service) echo "repo=focuspulse-notification" >> $GITHUB_OUTPUT ;;
+            analytics-service) echo "repo=focuspulse-analytics" >> $GITHUB_OUTPUT ;;
+            leaderboard-consumer) echo "repo=focuspulse-leaderboard" >> $GITHUB_OUTPUT ;;
+            *) echo "repo=focuspulse-${{ matrix.service }}" >> $GITHUB_OUTPUT ;;
+          esac
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -122,18 +140,19 @@ jobs:
 
       - name: Build Docker image
         run: |
+          ECR_REPO="${{ steps.ecr-repo.outputs.repo }}"
           if [ "${{ matrix.service }}" = "rag-service" ]; then
-            docker build -t ${{ env.ECR_REPOSITORY_PREFIX }}/${{ matrix.service }}:${{ github.sha }} -f services/rag-service/Dockerfile .
+            docker build -t ${{ env.ECR_REGISTRY }}/${ECR_REPO}:${{ github.sha }} -f services/rag-service/Dockerfile .
           elif [ "${{ matrix.service }}" = "analytics-service" ]; then
-            docker build -t ${{ env.ECR_REPOSITORY_PREFIX }}/${{ matrix.service }}:${{ github.sha }} -f services/analytics-service/Dockerfile ./services/analytics-service
+            docker build -t ${{ env.ECR_REGISTRY }}/${ECR_REPO}:${{ github.sha }} -f services/analytics-service/Dockerfile ./services/analytics-service
           elif [ "${{ matrix.service }}" = "leaderboard-consumer" ]; then
-            docker build -t ${{ env.ECR_REPOSITORY_PREFIX }}/${{ matrix.service }}:${{ github.sha }} -f consumers/leaderboard/Dockerfile .
+            docker build -t ${{ env.ECR_REGISTRY }}/${ECR_REPO}:${{ github.sha }} -f consumers/leaderboard/Dockerfile .
           elif [ "${{ matrix.service }}" = "frontend" ]; then
-            docker build -t ${{ env.ECR_REPOSITORY_PREFIX }}/${{ matrix.service }}:${{ github.sha }} -f frontend/Dockerfile ./frontend
+            docker build -t ${{ env.ECR_REGISTRY }}/${ECR_REPO}:${{ github.sha }} -f frontend/Dockerfile ./frontend
           elif [ "${{ matrix.service }}" = "bff" ]; then
-            docker build -t ${{ env.ECR_REPOSITORY_PREFIX }}/${{ matrix.service }}:${{ github.sha }} -f bff/Dockerfile .
+            docker build -t ${{ env.ECR_REGISTRY }}/${ECR_REPO}:${{ github.sha }} -f bff/Dockerfile .
           else
-            docker build -t ${{ env.ECR_REPOSITORY_PREFIX }}/${{ matrix.service }}:${{ github.sha }} -f services/${{ matrix.service }}/Dockerfile .
+            docker build -t ${{ env.ECR_REGISTRY }}/${ECR_REPO}:${{ github.sha }} -f services/${{ matrix.service }}/Dockerfile .
           fi
 
       - name: Login to Amazon ECR
@@ -144,13 +163,13 @@ jobs:
 
       - name: Push to ECR
         run: |
-          docker tag ${{ env.ECR_REPOSITORY_PREFIX }}/${{ matrix.service }}:{{ github.sha }} ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
-          docker push ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
+          ECR_REPO="${{ steps.ecr-repo.outputs.repo }}"
+          docker push ${{ env.ECR_REGISTRY }}/${ECR_REPO}:${{ github.sha }}
 
           # Also tag as latest for main branch
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            docker tag ${{ env.ECR_REPOSITORY_PREFIX }}/${{ matrix.service }}:{{ github.sha }} ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_PREFIX }}/${{ matrix.service }}:latest
-            docker push ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_PREFIX }}/${{ matrix.service }}:latest
+            docker tag ${{ env.ECR_REGISTRY }}/${ECR_REPO}:${{ github.sha }} ${{ env.ECR_REGISTRY }}/${ECR_REPO}:latest
+            docker push ${{ env.ECR_REGISTRY }}/${ECR_REPO}:latest
           fi
 
   # Build Kong gateway config

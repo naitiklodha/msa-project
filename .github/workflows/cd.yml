@@ -32,7 +32,6 @@ on:
 env:
   AWS_REGION: ap-south-1
   ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
-  ECR_REPOSITORY_PREFIX: focuspulse
   ECS_CLUSTER: focuspulse-cluster
 
 jobs:
@@ -98,15 +97,34 @@ jobs:
           TAG=${{ steps.image-tag.outputs.tag }}
           FORCE=${{ github.event.inputs.force_new_deployment }}
 
+          # Function to map service name to ECR repo name
+          ecr_repo() {
+            case "$1" in
+              auth-service) echo "focuspulse-auth" ;;
+              game-service) echo "focuspulse-game" ;;
+              timer-service) echo "focuspulse-timer" ;;
+              rag-service) echo "focuspulse-rag" ;;
+              bff) echo "focuspulse-bff" ;;
+              frontend) echo "focuspulse-frontend" ;;
+              leaderboard-service) echo "focuspulse-leaderboard" ;;
+              room-service) echo "focuspulse-room" ;;
+              notification-service) echo "focuspulse-notification" ;;
+              analytics-service) echo "focuspulse-analytics" ;;
+              focuspulse-kong-service) echo "focuspulse-kong" ;;
+              *) echo "focuspulse-$1" ;;
+            esac
+          }
+
           for SERVICE in "${SERVICES[@]}"; do
             echo "Deploying $SERVICE with tag $TAG..."
 
             # Update the service to use the new image
             if [ "$SERVICE" = "focuspulse-kong-service" ]; then
               # Kong service uses a different image pattern
-              IMAGE="${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_PREFIX }}/kong:3.4"
+              IMAGE="${{ env.ECR_REGISTRY }}/focuspulse-kong:3.4"
             else
-              IMAGE="${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_PREFIX }}/${SERVICE}:${TAG}"
+              ECR_REPO=$(ecr_repo "$SERVICE")
+              IMAGE="${{ env.ECR_REGISTRY }}/${ECR_REPO}:${TAG}"
             fi
 
             # Force new deployment if requested or if image changed
@@ -244,7 +262,30 @@ jobs:
           TAG="${{ github.event.inputs.tag || 'latest' }}"
           FORCE="${{ github.event.inputs.force_new_deployment }}"
 
-          IMAGE="${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_PREFIX }}/${SERVICE}:${TAG}"
+          # Function to map service name to ECR repo name
+          ecr_repo() {
+            case "$1" in
+              auth-service) echo "focuspulse-auth" ;;
+              game-service) echo "focuspulse-game" ;;
+              timer-service) echo "focuspulse-timer" ;;
+              rag-service) echo "focuspulse-rag" ;;
+              bff) echo "focuspulse-bff" ;;
+              frontend) echo "focuspulse-frontend" ;;
+              leaderboard-service) echo "focuspulse-leaderboard" ;;
+              room-service) echo "focuspulse-room" ;;
+              notification-service) echo "focuspulse-notification" ;;
+              analytics-service) echo "focuspulse-analytics" ;;
+              focuspulse-kong-service) echo "focuspulse-kong" ;;
+              *) echo "focuspulse-$1" ;;
+            esac
+          }
+
+          if [ "$SERVICE" = "focuspulse-kong-service" ]; then
+            IMAGE="${{ env.ECR_REGISTRY }}/focuspulse-kong:3.4"
+          else
+            ECR_REPO=$(ecr_repo "$SERVICE")
+            IMAGE="${{ env.ECR_REGISTRY }}/${ECR_REPO}:${TAG}"
+          fi
 
           FORCE_FLAG=""
           if [ "$FORCE" = "true" ]; then
