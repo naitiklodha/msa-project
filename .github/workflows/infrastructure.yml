@@ -1,0 +1,105 @@
+name: Infrastructure Management
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Infrastructure action to perform'
+        required: true
+        type: choice
+        options:
+          - setup-ecr-lifecycle
+          - verify-ecr-repos
+          - check-ecs-services
+          - check-alb-health
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY_PREFIX: focuspulse
+  ECS_CLUSTER: focuspulse-cluster
+
+jobs:
+  infrastructure:
+    name: Infrastructure Action
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: GitHubActionsInfra
+
+      - name: Setup ECR Lifecycle Policies
+        if: github.event.inputs.action == 'setup-ecr-lifecycle'
+        run: |
+          chmod +x scripts/setup-ecr-lifecycle.sh
+          ./scripts/setup-ecr-lifecycle.sh
+
+      - name: Verify ECR Repositories
+        if: github.event.inputs.action == 'verify-ecr-repos'
+        run: |
+          echo "Checking ECR repositories..."
+          EXPECTED_REPOS=(
+            "auth-service"
+            "game-service"
+            "timer-service"
+            "rag-service"
+            "bff"
+            "frontend"
+            "leaderboard-service"
+            "room-service"
+            "notification-service"
+            "analytics-service"
+            "kong"
+          )
+
+          for repo in "${EXPECTED_REPOS[@]}"; do
+            FULL_NAME="${{ env.ECR_REPOSITORY_PREFIX }}/${repo}"
+            if aws ecr describe-repositories --repository-names "$FULL_NAME" --region ${{ env.AWS_REGION }} &>/dev/null; then
+              echo "✅ $FULL_NAME exists"
+              # Show image count
+              COUNT=$(aws ecr describe-images --repository-name "$FULL_NAME" --region ${{ env.AWS_REGION }} --query 'length(imageDetails)' --output text 2>/dev/null || echo "0")
+              echo "   Images: $COUNT"
+            else
+              echo "❌ $FULL_NAME MISSING"
+            fi
+          done
+
+      - name: Check ECS Services
+        if: github.event.inputs.action == 'check-ecs-services'
+        run: |
+          echo "Checking ECS services in cluster ${{ env.ECS_CLUSTER }}..."
+          aws ecs list-services --cluster ${{ env.ECS_CLUSTER }} --region ${{ env.AWS_REGION }} --output table
+
+          echo ""
+          echo "Service details:"
+          SERVICES=$(aws ecs list-services --cluster ${{ env.ECS_CLUSTER }} --region ${{ env.AWS_REGION }} --query 'serviceArns[]' --output text)
+          for svc in $SERVICES; do
+            SVC_NAME=$(basename $svc)
+            aws ecs describe-services --cluster ${{ env.ECS_CLUSTER }} --services $SVC_NAME --region ${{ env.AWS_REGION }} \
+              --query 'services[0].{name:serviceName, status:status, running:runningCount, desired:desiredCount, pending:pendingCount, deployments:deployments[0].{status:status, rollout:rolloutState}}' \
+              --output table
+          done
+
+      - name: Check ALB Health
+        if: github.event.inputs.action == 'check-alb-health'
+        run: |
+          echo "Checking ALB health..."
+          ALB_ARN=$(aws elbv2 describe-load-balancers --names focuspulse-alb --region ${{ env.AWS_REGION }} --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+          echo "ALB ARN: $ALB_ARN"
+
+          TARGET_GROUPS=$(aws elbv2 describe-target-groups --load-balancer-arn $ALB_ARN --region ${{ env.AWS_REGION }} --query 'TargetGroups[].TargetGroupArn' --output text)
+          for tg in $TARGET_GROUPS; do
+            echo "--- Target Group: $tg ---"
+            aws elbv2 describe-target-health --target-group-arn $tg --region ${{ env.AWS_REGION }} \
+              --query 'TargetHealthDescriptions[].{Target:Target.Id, Port:Target.Port, Health:TargetHealth.State, Reason:TargetHealth.Reason, Description:TargetHealth.Description}' \
+              --output table
+          done

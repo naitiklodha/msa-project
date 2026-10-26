@@ -7,7 +7,14 @@
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down -v",
     "docker:logs": "docker compose logs -f",
-    "test:smoke": "bash scripts/smoke-test.sh"
+    "test:smoke": "bash scripts/smoke-test.sh",
+    "deploy": "bash scripts/deploy.sh deploy",
+    "deploy:status": "bash scripts/deploy.sh status",
+    "deploy:logs": "bash scripts/deploy.sh logs",
+    "deploy:scale": "bash scripts/deploy.sh scale",
+    "deploy:images": "bash scripts/deploy.sh images",
+    "infra:ecr-lifecycle": "bash scripts/setup-ecr-lifecycle.sh",
+    "ci:validate": "npm run docker:up && sleep 30 && npm run test:smoke && npm run docker:down"
   },
   "engines": {
     "node": ">=20.0.0"

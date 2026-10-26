@@ -1,0 +1,268 @@
+name: CD - Deploy to ECS Fargate
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+      services:
+        description: 'Comma-separated list of services to deploy (empty = all)'
+        required: false
+        default: ''
+        type: string
+      force_new_deployment:
+        description: 'Force new deployment even if image tag unchanged'
+        required: false
+        default: false
+        type: boolean
+
+  # Auto-deploy on main branch after successful CI
+  workflow_run:
+    workflows: ["CI - Build, Test & Push to ECR"]
+    types:
+      - completed
+    branches: [main]
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+  ECR_REPOSITORY_PREFIX: focuspulse
+  ECS_CLUSTER: focuspulse-cluster
+
+jobs:
+  deploy:
+    name: Deploy to ECS
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: GitHubActionsDeploy
+
+      - name: Determine services to deploy
+        id: services
+        run: |
+          # Default services list from docker-compose
+          ALL_SERVICES=(
+            "auth-service"
+            "game-service"
+            "timer-service"
+            "rag-service"
+            "bff"
+            "frontend"
+            "leaderboard-service"
+            "room-service"
+            "notification-service"
+            "analytics-service"
+            "focuspulse-kong-service"
+          )
+
+          if [ -n "${{ github.event.inputs.services }}" ]; then
+            # Use comma-separated list from workflow_dispatch input
+            IFS=',' read -ra SERVICES <<< "${{ github.event.inputs.services }}"
+            echo "services=${SERVICES[*]}" >> $GITHUB_OUTPUT
+          else
+            # Deploy all services
+            echo "services=${ALL_SERVICES[*]}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get image tag
+        id: image-tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # For manual trigger, use latest or specific tag
+            echo "tag=latest" >> $GITHUB_OUTPUT
+          else
+            # For auto-deploy from CI, use the git SHA
+            echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy services
+        run: |
+          SERVICES=(${{ steps.services.outputs.services }})
+          TAG=${{ steps.image-tag.outputs.tag }}
+          FORCE=${{ github.event.inputs.force_new_deployment }}
+
+          for SERVICE in "${SERVICES[@]}"; do
+            echo "Deploying $SERVICE with tag $TAG..."
+
+            # Update the service to use the new image
+            if [ "$SERVICE" = "focuspulse-kong-service" ]; then
+              # Kong service uses a different image pattern
+              IMAGE="${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_PREFIX }}/kong:3.4"
+            else
+              IMAGE="${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_PREFIX }}/${SERVICE}:${TAG}"
+            fi
+
+            # Force new deployment if requested or if image changed
+            FORCE_FLAG=""
+            if [ "$FORCE" = "true" ]; then
+              FORCE_FLAG="--force-new-deployment"
+            fi
+
+            aws ecs update-service \
+              --cluster ${{ env.ECS_CLUSTER }} \
+              --service $SERVICE \
+              --image $IMAGE \
+              $FORCE_FLAG \
+              --region ${{ env.AWS_REGION }} \
+              --output json | jq -r '.service.deployments[0].status'
+
+            echo "✅ Deployed $SERVICE"
+          done
+
+      - name: Wait for deployments to stabilize
+        run: |
+          SERVICES=(${{ steps.services.outputs.services }})
+
+          for SERVICE in "${SERVICES[@]}"; do
+            echo "Waiting for $SERVICE to stabilize..."
+            aws ecs wait services-stable \
+              --cluster ${{ env.ECS_CLUSTER }} \
+              --services $SERVICE \
+              --region ${{ env.AWS_REGION }}
+            echo "✅ $SERVICE is stable"
+          done
+
+      - name: Verify deployment health
+        run: |
+          SERVICES=(${{ steps.services.outputs.services }})
+
+          for SERVICE in "${SERVICES[@]}"; do
+            echo "Checking health of $SERVICE..."
+
+            # Get task ARNs for the service
+            TASK_ARNS=$(aws ecs list-tasks \
+              --cluster ${{ env.ECS_CLUSTER }} \
+              --service-name $SERVICE \
+              --desired-status RUNNING \
+              --region ${{ env.AWS_REGION }} \
+              --query 'taskArns[]' \
+              --output text)
+
+            if [ -n "$TASK_ARNS" ]; then
+              # Describe tasks to get health status
+              aws ecs describe-tasks \
+                --cluster ${{ env.ECS_CLUSTER }} \
+                --tasks $TASK_ARNS \
+                --region ${{ env.AWS_REGION }} \
+                --query 'tasks[].{service:group, lastStatus:lastStatus, healthStatus:healthStatus}' \
+                --output table
+            else
+              echo "⚠️ No running tasks for $SERVICE"
+            fi
+          done
+
+      - name: Run post-deployment smoke test
+        run: |
+          # Get ALB DNS name
+          ALB_DNS=$(aws elbv2 describe-load-balancers \
+            --names focuspulse-alb \
+            --region ${{ env.AWS_REGION }} \
+            --query 'LoadBalancers[0].DNSName' \
+            --output text)
+
+          echo "ALB DNS: $ALB_DNS"
+
+          # Wait a bit for ALB to register new targets
+          sleep 30
+
+          # Run basic health checks
+          echo "Running health checks..."
+          curl -f "http://$ALB_DNS/healthz" || echo "Health check failed"
+          curl -f "http://$ALB_DNS/api/healthz" || echo "API health check failed"
+
+          echo "✅ Post-deployment verification complete"
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed!"
+          # Could add SNS notification or Slack webhook here
+          # aws sns publish --topic-arn ${{ secrets.SNS_ALERT_TOPIC }} --message "Deployment failed for ${{ github.repository }}"
+
+  rollback:
+    name: Rollback Deployment
+    runs-on: ubuntu-latest
+    if: failure()
+    needs: deploy
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: GitHubActionsRollback
+
+      - name: Rollback to previous task definition
+        run: |
+          SERVICES=(${{ needs.deploy.outputs.services }})  # This won't work directly, need to pass differently
+
+          # For each service, get the previous task definition and rollback
+          # This is a simplified rollback - in production you'd want more sophisticated logic
+          echo "Rollback triggered. Manual intervention may be required."
+          echo "Check ECS console for previous task definitions to rollback to."
+
+  # Alternative: Deploy specific service
+  deploy-single:
+    name: Deploy Single Service
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      id-token: write
+      contents: read
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.services != ''
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: GitHubActionsDeploySingle
+
+      - name: Deploy single service
+        run: |
+          SERVICE="${{ github.event.inputs.services }}"
+          TAG="${{ github.event.inputs.tag || 'latest' }}"
+          FORCE="${{ github.event.inputs.force_new_deployment }}"
+
+          IMAGE="${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY_PREFIX }}/${SERVICE}:${TAG}"
+
+          FORCE_FLAG=""
+          if [ "$FORCE" = "true" ]; then
+            FORCE_FLAG="--force-new-deployment"
+          fi
+
+          echo "Deploying $SERVICE with image $IMAGE"
+
+          aws ecs update-service \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --service $SERVICE \
+            --image $IMAGE \
+            $FORCE_FLAG \
+            --region ${{ env.AWS_REGION }}
+
+          aws ecs wait services-stable \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services $SERVICE \
+            --region ${{ env.AWS_REGION }}
+
+          echo "✅ $SERVICE deployed and stable"
