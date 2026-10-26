@@ -58,10 +58,10 @@ services:
   # The front door. Everything hits Kong first before getting routed 
   # to the internal services.
   kong:
-    image: kong:3.4
+    build:
+      context: ./gateway
     environment:
       KONG_DATABASE: ${KONG_DATABASE}
-      KONG_DECLARATIVE_CONFIG: ${KONG_DECLARATIVE_CONFIG}
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
@@ -70,10 +70,12 @@ services:
       KONG_DNS_RESOLVER: 127.0.0.11
       CORS_ORIGINS: ${CORS_ORIGINS}
       KONG_CORS_ORIGIN: ${KONG_CORS_ORIGIN}
+      JWT_SECRET: ${JWT_SECRET}
       AUTH_SERVICE_URL: ${AUTH_SERVICE_URL}
       GAME_SERVICE_URL: ${GAME_SERVICE_URL}
       TIMER_SERVICE_URL: ${TIMER_SERVICE_URL}
       RAG_SERVICE_URL: ${RAG_SERVICE_URL}
+      QUIZ_SERVICE_URL: ${QUIZ_SERVICE_URL:-${RAG_SERVICE_URL}/documents/quiz}
       BFF_SERVICE_URL: ${BFF_SERVICE_URL}
       LEADERBOARD_SERVICE_URL: ${LEADERBOARD_SERVICE_URL}
       NOTIFICATION_SERVICE_URL: ${NOTIFICATION_SERVICE_URL}
@@ -81,7 +83,7 @@ services:
       ANALYTICS_SERVICE_URL: ${ANALYTICS_SERVICE_URL}
       FRONTEND_SERVICE_URL: ${FRONTEND_SERVICE_URL}
     volumes:
-      - ./gateway/kong.yml:/etc/kong/kong.yml
+      - ./gateway/kong.yml:/etc/kong/kong.template.yml
     ports:
       - "8000:8000"
       - "8001:8001"

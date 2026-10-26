@@ -1,11 +1,21 @@
 _format_version: "3.0"
 _transform: true
 
+# ──────────────────────────────────────────────────────────────────
+# FocusPulse Kong Gateway - AWS ECS / Cloud Map edition
+#
+# All upstream URLs use Cloud Map service discovery:
+#   http://<service-name>.focuspulse.local:<port>
+#
+# Rate limiting uses local policy (no Redis dependency in the gateway)
+# DNS resolver: 169.254.169.253 (AWS Route 53 Resolver)
+# ──────────────────────────────────────────────────────────────────
+
 plugins:
   - name: cors
     config:
       origins:
-        - ${{KONG_CORS_ORIGIN}}
+        - $(env "KONG_CORS_ORIGIN")
       methods:
         - GET
         - POST
@@ -25,28 +35,34 @@ plugins:
         - Authorization
       credentials: true
       max_age: 3600
+
   - name: rate-limiting
     config:
       second: 200
       minute: 5000
-      policy: redis
-      redis_host: redis
-      redis_port: 6379
+      policy: local
 
 services:
   - name: auth-service
-    url: ${{AUTH_SERVICE_URL}}
+    url: $(env "AUTH_SERVICE_URL")
+    connect_timeout: 5000
+    read_timeout: 10000
+    write_timeout: 10000
     routes:
       - name: auth-route
         paths:
           - /auth
 
   - name: game-service
-    url: ${{GAME_SERVICE_URL}}
+    url: $(env "GAME_SERVICE_URL")
+    connect_timeout: 5000
+    read_timeout: 10000
+    write_timeout: 10000
     routes:
       - name: game-public
         paths:
-          - /game/healthz
+          - /game/health/live
+          - /game/health/ready
           - /game/metrics
       - name: game-protected
         paths:
@@ -58,7 +74,10 @@ services:
               run_on_preflight: true
 
   - name: rag-service
-    url: ${{RAG_SERVICE_URL}}
+    url: $(env "RAG_SERVICE_URL")
+    connect_timeout: 10000
+    read_timeout: 60000
+    write_timeout: 60000
     routes:
       - name: rag-public
         paths:
@@ -77,11 +96,15 @@ services:
               run_on_preflight: true
 
   - name: timer-service
-    url: ${{TIMER_SERVICE_URL}}
+    url: $(env "TIMER_SERVICE_URL")
+    connect_timeout: 5000
+    read_timeout: 10000
+    write_timeout: 10000
     routes:
       - name: timer-public
         paths:
-          - /timer/healthz
+          - /timer/health/live
+          - /timer/health/ready
           - /timer/metrics
       - name: timer-protected
         paths:
@@ -93,7 +116,10 @@ services:
               run_on_preflight: true
 
   - name: quiz-service
-    url: ${{RAG_SERVICE_URL}}/documents/quiz
+    url: $(env "QUIZ_SERVICE_URL")
+    connect_timeout: 10000
+    read_timeout: 30000
+    write_timeout: 30000
     routes:
       - name: quiz-public
         paths:
@@ -108,19 +134,16 @@ services:
               secret_is_base64: false
               run_on_preflight: true
 
-  - name: frontend
-    url: ${{FRONTEND_SERVICE_URL}}
-    routes:
-      - name: frontend-route
-        paths:
-          - /
-
   - name: bff
-    url: ${{BFF_SERVICE_URL}}
+    url: $(env "BFF_SERVICE_URL")
+    connect_timeout: 5000
+    read_timeout: 30000
+    write_timeout: 30000
     routes:
       - name: bff-public
         paths:
-          - /api/healthz
+          - /api/health/live
+          - /api/health/ready
           - /api/metrics
       - name: bff-dashboard
         paths:
@@ -144,7 +167,10 @@ services:
               run_on_preflight: true
 
   - name: leaderboard-service
-    url: ${{LEADERBOARD_SERVICE_URL}}
+    url: $(env "LEADERBOARD_SERVICE_URL")
+    connect_timeout: 5000
+    read_timeout: 10000
+    write_timeout: 10000
     routes:
       - name: leaderboard-public
         paths:
@@ -159,7 +185,10 @@ services:
         strip_path: false
 
   - name: notification-svc
-    url: ${{NOTIFICATION_SERVICE_URL}}
+    url: $(env "NOTIFICATION_SERVICE_URL")
+    connect_timeout: 5000
+    read_timeout: 10000
+    write_timeout: 10000
     routes:
       - name: notification-protected
         paths:
@@ -171,11 +200,15 @@ services:
               run_on_preflight: true
 
   - name: analytics-service
-    url: ${{ANALYTICS_SERVICE_URL}}
+    url: $(env "ANALYTICS_SERVICE_URL")
+    connect_timeout: 5000
+    read_timeout: 10000
+    write_timeout: 10000
     routes:
       - name: analytics-public
         paths:
-          - /analytics/healthz
+          - /analytics/health/live
+          - /analytics/health/ready
       - name: analytics-protected
         paths:
           - /analytics
@@ -186,7 +219,10 @@ services:
               run_on_preflight: true
 
   - name: room-service
-    url: ${{ROOM_SERVICE_URL}}
+    url: $(env "ROOM_SERVICE_URL")
+    connect_timeout: 5000
+    read_timeout: 10000
+    write_timeout: 10000
     routes:
       - name: room-public
         paths:
@@ -209,8 +245,18 @@ services:
           - https
         strip_path: false
 
+  - name: frontend
+    url: $(env "FRONTEND_SERVICE_URL")
+    connect_timeout: 5000
+    read_timeout: 10000
+    write_timeout: 10000
+    routes:
+      - name: frontend-route
+        paths:
+          - /
+
 consumers:
   - username: focuspulse-app
     jwt_secrets:
       - key: focuspulse
-        secret: b8e83891c8103c8e30ab72aa12321811462f8e1f4bbf32ced8e8a7d1050d3009
+        secret: $(env "JWT_SECRET")

@@ -1,15 +1,22 @@
-# Custom Kong image with declarative config baked in
+# Custom Kong image with declarative config template
 FROM kong:3.4
 
-# Copy declarative config to expected location
-COPY kong.yml /tmp/kong.yml
+# Switch to root to copy and set permissions
+USER root
 
-# Set environment variable for Kong to find the config
-ENV KONG_DECLARATIVE_CONFIG=/tmp/kong.yml
+# Copy declarative config template
+COPY kong.yml /etc/kong/kong.template.yml
+
+# Copy custom entrypoint that renders the template
+COPY kong-entrypoint.sh /kong-entrypoint.sh
+RUN chmod +x /kong-entrypoint.sh
+
+# Switch back to kong user
+USER kong
 
 # Expose Kong ports
 EXPOSE 8000 8443 8001 8444
 
-# Use Kong's default entrypoint
-ENTRYPOINT ["/docker-entrypoint.sh"]
+# Use custom entrypoint that processes template with envsubst
+ENTRYPOINT ["/kong-entrypoint.sh"]
 CMD ["kong", "docker-start"]

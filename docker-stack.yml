@@ -59,17 +59,31 @@ services:
 
   # --- API Gateway ---
   kong:
-    image: kong:3.4
+    build:
+      context: ./gateway
+    image: msa-project-kong:latest
     environment:
       KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_ADMIN_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_ADMIN_LISTEN: 0.0.0.0:8001
+      KONG_CORS_ORIGIN: ${KONG_CORS_ORIGIN:-http://localhost:8002}
+      JWT_SECRET: ${JWT_SECRET}
+      AUTH_SERVICE_URL: http://auth-service:${AUTH_SERVICE_PORT}
+      GAME_SERVICE_URL: http://game-service:${GAME_SERVICE_PORT}
+      TIMER_SERVICE_URL: http://timer-service:${TIMER_SERVICE_PORT}
+      RAG_SERVICE_URL: http://rag-service:${RAG_SERVICE_PORT}
+      QUIZ_SERVICE_URL: http://rag-service:${RAG_SERVICE_PORT}/documents/quiz
+      BFF_SERVICE_URL: http://bff:${BFF_PORT}
+      LEADERBOARD_SERVICE_URL: http://leaderboard-service:${LEADERBOARD_SERVICE_PORT}
+      NOTIFICATION_SERVICE_URL: http://notification-service:${NOTIFICATION_SERVICE_PORT}
+      ROOM_SERVICE_URL: http://room-service:${ROOM_SERVICE_PORT}
+      ANALYTICS_SERVICE_URL: http://analytics-service:${ANALYTICS_SERVICE_PORT}
+      FRONTEND_SERVICE_URL: http://frontend:80
     volumes:
-      - ./gateway/kong.yml:/etc/kong/kong.yml
+      - ./gateway/kong.yml:/etc/kong/kong.template.yml
     ports:
       - "8000:8000"
       - "8001:8001"
