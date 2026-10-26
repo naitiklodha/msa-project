@@ -57,8 +57,7 @@ jobs:
         id: services
         run: |
           # Default services list from docker-compose
-          # Note: focuspulse-kong-service excluded - uses external Kong image with custom config
-          # not built by CI; deploy separately to preserve kong.yml mount
+          # Kong is now built by CI with custom Dockerfile (bakes kong.yml)
           ALL_SERVICES=(
             "auth-service"
             "game-service"
@@ -70,6 +69,7 @@ jobs:
             "room-service"
             "notification-service"
             "analytics-service"
+            "focuspulse-kong-service"
           )
 
           if [ -n "${{ github.event.inputs.services }}" ]; then
@@ -316,18 +316,10 @@ jobs:
               room-service) echo "focuspulse-room" ;;
               notification-service) echo "focuspulse-notification" ;;
               analytics-service) echo "focuspulse-analytics" ;;
+              focuspulse-kong-service) echo "focuspulse-kong" ;;
               *) echo "focuspulse-$1" ;;
             esac
           }
-
-          # Kong is not built by CI and has custom config (kong.yml mount)
-          # The pipeline's task definition modification breaks Kong's config
-          if [ "$SERVICE" = "focuspulse-kong-service" ]; then
-            echo "❌ Kong service cannot be deployed via this pipeline."
-            echo "   Kong uses an external image with custom declarative config."
-            echo "   Deploy Kong manually via ECS Console or a separate process."
-            exit 1
-          fi
 
           ECR_REPO=$(ecr_repo "$SERVICE")
           IMAGE="${{ env.ECR_REGISTRY }}/${ECR_REPO}:${TAG}"

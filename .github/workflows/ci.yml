@@ -60,6 +60,7 @@ jobs:
           - notification-service
           - analytics-service
           - leaderboard-consumer
+          - kong
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -88,6 +89,7 @@ jobs:
             notification-service) echo "repo=focuspulse-notification" >> $GITHUB_OUTPUT ;;
             analytics-service) echo "repo=focuspulse-analytics" >> $GITHUB_OUTPUT ;;
             leaderboard-consumer) echo "repo=focuspulse-leaderboard" >> $GITHUB_OUTPUT ;;
+            kong) echo "repo=focuspulse-kong" >> $GITHUB_OUTPUT ;;
             *) echo "repo=focuspulse-${{ matrix.service }}" >> $GITHUB_OUTPUT ;;
           esac
 
@@ -161,6 +163,8 @@ jobs:
             docker build -t ${{ env.ECR_REGISTRY }}/${ECR_REPO}:${{ github.sha }} -f frontend/Dockerfile ./frontend
           elif [ "${{ matrix.service }}" = "bff" ]; then
             docker build -t ${{ env.ECR_REGISTRY }}/${ECR_REPO}:${{ github.sha }} -f bff/Dockerfile .
+          elif [ "${{ matrix.service }}" = "kong" ]; then
+            docker build -t ${{ env.ECR_REGISTRY }}/${ECR_REPO}:${{ github.sha }} -f gateway/Dockerfile ./gateway
           else
             docker build -t ${{ env.ECR_REGISTRY }}/${ECR_REPO}:${{ github.sha }} -f services/${{ matrix.service }}/Dockerfile .
           fi
@@ -182,25 +186,11 @@ jobs:
             docker push ${{ env.ECR_REGISTRY }}/${ECR_REPO}:latest
           fi
 
-  # Build Kong gateway config
-  build-gateway:
-    name: Build Gateway Config
-    runs-on: ubuntu-latest
-    needs: validate
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          path: .
-
-      - name: Validate Kong config
-        run: python3 -c "import yaml; yaml.safe_load(open('gateway/kong.yml')); print('✅ Kong config YAML syntax is valid')"
-
   # Run smoke tests against deployed services (optional - can be triggered manually)
   smoke-test:
     name: Smoke Test
     runs-on: ubuntu-latest
-    needs: [build-and-test, build-gateway]
+    needs: [build-and-test]
     if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     permissions:
       id-token: write
@@ -229,7 +219,7 @@ jobs:
   summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [build-and-test, build-gateway]
+    needs: [build-and-test]
     if: always()
     steps:
       - name: Check job statuses
