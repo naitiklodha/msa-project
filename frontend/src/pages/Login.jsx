@@ -45,11 +45,11 @@ const Login = () => {
             {/* Left Side: Branding/Visuals */}
             <div className="hidden lg:flex lg:w-1/2 relative z-10 flex-col justify-between p-20 bg-white/[0.02] border-r border-white/5">
                 <div>
-                     <div className="flex items-center gap-4 mb-24">
+                    <div className="flex items-center gap-4 mb-24">
                         <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-[0_0_30px_rgba(255,255,255,0.3)]">
                             <Sparkles className="w-8 h-8 text-cosmos-950" />
                         </div>
-                        <span className="font-display font-bold text-2xl tracking-[0.3em] text-white uppercase italic">Opalite</span>
+                        <span className="font-display font-bold text-2xl tracking-[0.3em] text-white uppercase italic">Focus</span>
                     </div>
 
                     <div className="space-y-8">
@@ -79,7 +79,7 @@ const Login = () => {
 
             {/* Right Side: Auth Form */}
             <div className="w-full lg:w-1/2 flex items-center justify-center p-8 relative z-10">
-                <motion.div 
+                <motion.div
                     initial={{ opacity: 0, y: 20 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="w-full max-w-md"
@@ -96,8 +96,8 @@ const Login = () => {
                     <form onSubmit={handleSubmit} className="space-y-6">
                         <div className="space-y-2">
                             <label className="text-[10px] font-display font-bold text-gray-500 uppercase tracking-[0.2em] ml-6">Identifier</label>
-                            <input 
-                                type="email" 
+                            <input
+                                type="email"
                                 placeholder="commander@sector.focuspulse"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
@@ -108,8 +108,8 @@ const Login = () => {
 
                         <div className="space-y-2">
                             <label className="text-[10px] font-display font-bold text-gray-500 uppercase tracking-[0.2em] ml-6">Access Key</label>
-                            <input 
-                                type="password" 
+                            <input
+                                type="password"
                                 placeholder="••••••••••••"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
@@ -125,8 +125,8 @@ const Login = () => {
                             </div>
                         )}
 
-                        <button 
-                            type="submit" 
+                        <button
+                            type="submit"
                             disabled={loading}
                             className="btn-premium w-full flex items-center justify-center gap-4 py-5 mt-4"
                         >
@@ -136,7 +136,7 @@ const Login = () => {
                     </form>
 
                     <div className="mt-12 text-center">
-                        <button 
+                        <button
                             onClick={() => setIsLogin(!isLogin)}
                             className="text-[10px] font-display font-black text-gray-500 hover:text-white uppercase tracking-[0.4em] transition-colors"
                         >
