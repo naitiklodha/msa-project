@@ -1,5 +1,5 @@
 import { defineConfig, loadEnv } from 'vite'
-import react from '@vitejs/plugin-react-swc'
+import react from '@vitejs/plugin-react'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_');
@@ -12,16 +12,5 @@ export default defineConfig(({ mode }) => {
     ])
     : {};
 
-  return {
-    plugins: [react()],
-    server: { proxy },
-    css: {
-      transformer: 'lightningcss',
-      lightningcss: {
-        drafts: {
-          customMedia: true,
-        },
-      },
-    },
-  };
+  return { plugins: [react()], server: { proxy } };
 });
