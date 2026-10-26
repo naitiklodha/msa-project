@@ -118,16 +118,48 @@ jobs:
           for SERVICE in "${SERVICES[@]}"; do
             echo "Deploying $SERVICE with tag $TAG..."
 
-            # Update the service to use the new image
+            # Get the current task definition ARN
             if [ "$SERVICE" = "focuspulse-kong-service" ]; then
-              # Kong service uses a different image pattern
               IMAGE="${{ env.ECR_REGISTRY }}/focuspulse-kong:3.4"
             else
               ECR_REPO=$(ecr_repo "$SERVICE")
               IMAGE="${{ env.ECR_REGISTRY }}/${ECR_REPO}:${TAG}"
             fi
 
-            # Force new deployment if requested or if image changed
+            # Get current task definition
+            CURRENT_TD=$(aws ecs describe-services \
+              --cluster ${{ env.ECS_CLUSTER }} \
+              --services $SERVICE \
+              --region ${{ env.AWS_REGION }} \
+              --query 'services[0].taskDefinition' \
+              --output text)
+
+            echo "Current task definition: $CURRENT_TD"
+
+            # Get task definition JSON
+            TD_JSON=$(aws ecs describe-task-definition \
+              --task-definition "$CURRENT_TD" \
+              --region ${{ env.AWS_REGION }} \
+              --output json)
+
+            # Create new task definition with updated image
+            # Extract container definitions and update the image
+            NEW_TD_JSON=$(echo "$TD_JSON" | jq --arg IMAGE "$IMAGE" '
+              .taskDefinition
+              | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
+              | .containerDefinitions[] |= (if .image | contains("'${{ env.ECR_REGISTRY }}'") then .image = $IMAGE else . end)
+            ')
+
+            # Register new task definition
+            NEW_TD_ARN=$(echo "$NEW_TD_JSON" | aws ecs register-task-definition \
+              --cli-input-json "$(cat)" \
+              --region ${{ env.AWS_REGION }} \
+              --query 'taskDefinition.taskDefinitionArn' \
+              --output text)
+
+            echo "New task definition: $NEW_TD_ARN"
+
+            # Update service to use new task definition
             FORCE_FLAG=""
             if [ "$FORCE" = "true" ]; then
               FORCE_FLAG="--force-new-deployment"
@@ -136,7 +168,7 @@ jobs:
             aws ecs update-service \
               --cluster ${{ env.ECS_CLUSTER }} \
               --service $SERVICE \
-              --image $IMAGE \
+              --task-definition "$NEW_TD_ARN" \
               $FORCE_FLAG \
               --region ${{ env.AWS_REGION }} \
               --output json | jq -r '.service.deployments[0].status'
@@ -294,10 +326,43 @@ jobs:
 
           echo "Deploying $SERVICE with image $IMAGE"
 
+          # Get current task definition
+          CURRENT_TD=$(aws ecs describe-services \
+            --cluster ${{ env.ECS_CLUSTER }} \
+            --services $SERVICE \
+            --region ${{ env.AWS_REGION }} \
+            --query 'services[0].taskDefinition' \
+            --output text)
+
+          echo "Current task definition: $CURRENT_TD"
+
+          # Get task definition JSON
+          TD_JSON=$(aws ecs describe-task-definition \
+            --task-definition "$CURRENT_TD" \
+            --region ${{ env.AWS_REGION }} \
+            --output json)
+
+          # Create new task definition with updated image
+          NEW_TD_JSON=$(echo "$TD_JSON" | jq --arg IMAGE "$IMAGE" '
+            .taskDefinition
+            | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
+            | .containerDefinitions[] |= (if .image | contains("'${{ env.ECR_REGISTRY }}'") then .image = $IMAGE else . end)
+          ')
+
+          # Register new task definition
+          NEW_TD_ARN=$(echo "$NEW_TD_JSON" | aws ecs register-task-definition \
+            --cli-input-json "$(cat)" \
+            --region ${{ env.AWS_REGION }} \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "New task definition: $NEW_TD_ARN"
+
+          # Update service to use new task definition
           aws ecs update-service \
             --cluster ${{ env.ECS_CLUSTER }} \
             --service $SERVICE \
-            --image $IMAGE \
+            --task-definition "$NEW_TD_ARN" \
             $FORCE_FLAG \
             --region ${{ env.AWS_REGION }}
 
