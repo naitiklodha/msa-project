@@ -119,12 +119,8 @@ jobs:
             echo "Deploying $SERVICE with tag $TAG..."
 
             # Get the current task definition ARN
-            if [ "$SERVICE" = "focuspulse-kong-service" ]; then
-              IMAGE="${{ env.ECR_REGISTRY }}/focuspulse-kong:3.4"
-            else
-              ECR_REPO=$(ecr_repo "$SERVICE")
-              IMAGE="${{ env.ECR_REGISTRY }}/${ECR_REPO}:${TAG}"
-            fi
+            ECR_REPO=$(ecr_repo "$SERVICE")
+            IMAGE="${{ env.ECR_REGISTRY }}/${ECR_REPO}:${TAG}"
 
             # Get current task definition
             CURRENT_TD=$(aws ecs describe-services \
@@ -319,12 +315,8 @@ jobs:
             esac
           }
 
-          if [ "$SERVICE" = "focuspulse-kong-service" ]; then
-            IMAGE="${{ env.ECR_REGISTRY }}/focuspulse-kong:3.4"
-          else
-            ECR_REPO=$(ecr_repo "$SERVICE")
-            IMAGE="${{ env.ECR_REGISTRY }}/${ECR_REPO}:${TAG}"
-          fi
+          ECR_REPO=$(ecr_repo "$SERVICE")
+          IMAGE="${{ env.ECR_REGISTRY }}/${ECR_REPO}:${TAG}"
 
           FORCE_FLAG=""
           if [ "$FORCE" = "true" ]; then
