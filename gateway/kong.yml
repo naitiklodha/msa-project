@@ -5,7 +5,7 @@ plugins:
   - name: cors
     config:
       origins:
-        - $(env "KONG_CORS_ORIGIN")
+        - ${KONG_CORS_ORIGIN}
       methods:
         - GET
         - POST
@@ -35,14 +35,14 @@ plugins:
 
 services:
   - name: auth-service
-    url: $(env "AUTH_SERVICE_URL")
+    url: ${AUTH_SERVICE_URL}
     routes:
       - name: auth-route
         paths:
           - /auth
 
   - name: game-service
-    url: $(env "GAME_SERVICE_URL")
+    url: ${GAME_SERVICE_URL}
     routes:
       - name: game-public
         paths:
@@ -58,7 +58,7 @@ services:
               run_on_preflight: true
 
   - name: rag-service
-    url: $(env "RAG_SERVICE_URL")
+    url: ${RAG_SERVICE_URL}
     routes:
       - name: rag-public
         paths:
@@ -77,7 +77,7 @@ services:
               run_on_preflight: true
 
   - name: timer-service
-    url: $(env "TIMER_SERVICE_URL")
+    url: ${TIMER_SERVICE_URL}
     routes:
       - name: timer-public
         paths:
@@ -93,7 +93,7 @@ services:
               run_on_preflight: true
 
   - name: quiz-service
-    url: $(env "RAG_SERVICE_URL")/documents/quiz
+    url: ${RAG_SERVICE_URL}/documents/quiz
     routes:
       - name: quiz-public
         paths:
@@ -109,14 +109,14 @@ services:
               run_on_preflight: true
 
   - name: frontend
-    url: $(env "FRONTEND_SERVICE_URL")
+    url: ${FRONTEND_SERVICE_URL}
     routes:
       - name: frontend-route
         paths:
           - /
 
   - name: bff
-    url: $(env "BFF_SERVICE_URL")
+    url: ${BFF_SERVICE_URL}
     routes:
       - name: bff-public
         paths:
@@ -144,7 +144,7 @@ services:
               run_on_preflight: true
 
   - name: leaderboard-service
-    url: $(env "LEADERBOARD_SERVICE_URL")
+    url: ${LEADERBOARD_SERVICE_URL}
     routes:
       - name: leaderboard-public
         paths:
@@ -159,7 +159,7 @@ services:
         strip_path: false
 
   - name: notification-svc
-    url: $(env "NOTIFICATION_SERVICE_URL")
+    url: ${NOTIFICATION_SERVICE_URL}
     routes:
       - name: notification-protected
         paths:
@@ -171,7 +171,7 @@ services:
               run_on_preflight: true
 
   - name: analytics-service
-    url: $(env "ANALYTICS_SERVICE_URL")
+    url: ${ANALYTICS_SERVICE_URL}
     routes:
       - name: analytics-public
         paths:
@@ -186,7 +186,7 @@ services:
               run_on_preflight: true
 
   - name: room-service
-    url: $(env "ROOM_SERVICE_URL")
+    url: ${ROOM_SERVICE_URL}
     routes:
       - name: room-public
         paths:
