@@ -123,6 +123,9 @@ jobs:
           elif [ "${{ matrix.service }}" = "bff" ]; then
             cd bff
             npm install
+          elif [ "${{ matrix.service }}" = "kong" ]; then
+            # Kong uses base image, no npm/pip deps to install
+            echo "Kong service - no dependencies to install"
           else
             cd services/${{ matrix.service }}
             npm install
@@ -145,6 +148,9 @@ jobs:
           elif [ "${{ matrix.service }}" = "bff" ]; then
             cd bff
             npm test 2>/dev/null || echo "No test script, skipping"
+          elif [ "${{ matrix.service }}" = "kong" ]; then
+            # Kong - no tests to run
+            echo "Kong service - no tests to run"
           else
             cd services/${{ matrix.service }}
             npm test 2>/dev/null || echo "No test script, skipping"
