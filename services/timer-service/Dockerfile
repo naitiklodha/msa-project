@@ -2,7 +2,7 @@ FROM node:20-alpine AS base
 WORKDIR /app
 
 # Install curl and download RDS CA bundle at build time (as root)
-RUN apk add --no-cache curl \
+RUN apk add --no-cache curl ca-certificates \
     && curl -sL https://s3.amazonaws.com/rds-downloads/rds-combined-ca-bundle.pem -o /tmp/rds-ca.pem \
     && update-ca-certificates
 ENV NODE_EXTRA_CA_CERTS=/tmp/rds-ca.pem
