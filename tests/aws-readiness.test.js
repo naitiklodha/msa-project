@@ -15,7 +15,7 @@ test('shared health routes expose standardized liveness and readiness paths', ()
 test('Kong declares configurable upstreams and all Socket.IO routes', () => {
   const kong = read('gateway/kong.yml');
   for (const variable of ['AUTH_SERVICE_URL', 'BFF_SERVICE_URL', 'LEADERBOARD_SERVICE_URL', 'ROOM_SERVICE_URL']) {
-    assert.match(kong, new RegExp(`\\$\\(env "${variable}"\\)`));
+    assert.match(kong, new RegExp(`\\$\\{\\{${variable}\\}\\}`));
   }
   for (const route of ['/socket.io', '/ws/leaderboard', '/ws/rooms']) {
     assert.ok(kong.includes(route), `${route} is declared`);
