@@ -211,6 +211,7 @@ jobs:
             # Create new task definition with updated image + fixed config
             # Fix: REDIS_URL to rediss:// (Valkey Serverless requires in-transit TLS),
             # remove NODE_EXTRA_CA_CERTS (now baked into image)
+            # Force GEMINI_EMBEDDING_MODEL to text-embedding-004 (768 dims) to match DB schema
             # For Kong: set AWS-optimized config (router flavor, rate-limiting policy)
             NEW_TD_JSON=$(echo "$TD_JSON" | jq --arg IMAGE "$IMAGE" '
               .taskDefinition
@@ -223,6 +224,7 @@ jobs:
                       elif .name=="KONG_ROUTER_FLAVOR" then .value="traditional"
                       elif .name=="RATE_LIMIT_POLICY" then .value="local"
                       elif .name=="REDIS_HOST" then .value="focuspulse-cache-ji5gw7.serverless.aps1.cache.amazonaws.com"
+                      elif .name=="GEMINI_EMBEDDING_MODEL" then .value="models/text-embedding-004"
                       else . end
                     )
                 )
@@ -428,6 +430,7 @@ jobs:
                     elif .name=="KONG_ROUTER_FLAVOR" then .value="traditional"
                     elif .name=="RATE_LIMIT_POLICY" then .value="local"
                     elif .name=="REDIS_HOST" then .value="focuspulse-cache-ji5gw7.serverless.aps1.cache.amazonaws.com"
+                    elif .name=="GEMINI_EMBEDDING_MODEL" then .value="models/text-embedding-004"
                     else . end
                   )
               )
