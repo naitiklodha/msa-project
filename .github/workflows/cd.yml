@@ -35,10 +35,74 @@ env:
   ECS_CLUSTER: focuspulse-cluster
 
 jobs:
+  migrate-db:
+    name: Run Database Migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      migration-status: ${{ steps.migrate.outputs.status }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: GitHubActionsMigrate
+
+      - name: Run DB migration via SSM tunnel
+        id: migrate
+        env:
+          RDS_ENDPOINT: ${{ secrets.RDS_ENDPOINT }}
+          BASTION_INSTANCE_ID: ${{ secrets.BASTION_INSTANCE_ID }}
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$RDS_ENDPOINT" ] || [ -z "$BASTION_INSTANCE_ID" ]; then
+            echo "::warning::RDS_ENDPOINT or BASTION_INSTANCE_ID not set — skipping migration"
+            echo "status=skipped" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Starting SSM tunnel to RDS..."
+          # Start tunnel in background
+          aws ssm start-session \
+            --target "$BASTION_INSTANCE_ID" \
+            --document-name AWS-StartPortForwardingSessionToRemoteHost \
+            --parameters "host=[\"$RDS_ENDPOINT\"],portNumber=[\"5432\"],localPortNumber=[\"5432\"]" \
+            --region ${{ env.AWS_REGION }} &
+          TUNNEL_PID=$!
+
+          # Wait for tunnel to be ready
+          sleep 5
+
+          # Run migration
+          echo "Running embedding dimension migration..."
+          if psql "postgresql://focuspulse:$PGPASSWORD@localhost:5432/focuspulse" \
+            -c "ALTER TABLE document_chunks ALTER COLUMN embedding TYPE VECTOR(768) USING embedding::VECTOR(768);" 2>&1; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "✅ Migration completed"
+          else
+            echo "status=failed" >> $GITHUB_OUTPUT
+            echo "::error::Migration failed"
+            kill $TUNNEL_PID 2>/dev/null || true
+            exit 1
+          fi
+
+          # Clean up tunnel
+          kill $TUNNEL_PID 2>/dev/null || true
+
   deploy:
     name: Deploy to ECS
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    needs: migrate-db
     permissions:
       id-token: write
       contents: read
@@ -145,15 +209,20 @@ jobs:
               --output json)
 
             # Create new task definition with updated image + fixed config
-            # Fix: REDIS_URL to redis://, remove NODE_EXTRA_CA_CERTS (now baked into image)
+            # Fix: REDIS_URL to rediss:// (Valkey Serverless requires in-transit TLS),
+            # remove NODE_EXTRA_CA_CERTS (now baked into image)
+            # For Kong: set AWS-optimized config (router flavor, rate-limiting policy)
             NEW_TD_JSON=$(echo "$TD_JSON" | jq --arg IMAGE "$IMAGE" '
               .taskDefinition
               | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)
               | .containerDefinitions[] |= (
                   (if .image | contains("'${{ env.ECR_REGISTRY }}'") then .image = $IMAGE else . end)
                   | .environment |= map(
-                      if .name=="REDIS_URL" then .value="redis://focuspulse-cache-ji5gw7.serverless.aps1.cache.amazonaws.com:6379"
+                      if .name=="REDIS_URL" then .value="rediss://focuspulse-cache-ji5gw7.serverless.aps1.cache.amazonaws.com:6379"
                       elif .name=="NODE_EXTRA_CA_CERTS" then empty
+                      elif .name=="KONG_ROUTER_FLAVOR" then .value="traditional"
+                      elif .name=="RATE_LIMIT_POLICY" then .value="local"
+                      elif .name=="REDIS_HOST" then .value="focuspulse-cache-ji5gw7.serverless.aps1.cache.amazonaws.com"
                       else . end
                     )
                 )
@@ -354,8 +423,11 @@ jobs:
             | .containerDefinitions[] |= (
                 (if .image | contains("'${{ env.ECR_REGISTRY }}'") then .image = $IMAGE else . end)
                 | .environment |= map(
-                    if .name=="REDIS_URL" then .value="redis://focuspulse-cache-ji5gw7.serverless.aps1.cache.amazonaws.com:6379"
+                    if .name=="REDIS_URL" then .value="rediss://focuspulse-cache-ji5gw7.serverless.aps1.cache.amazonaws.com:6379"
                     elif .name=="NODE_EXTRA_CA_CERTS" then empty
+                    elif .name=="KONG_ROUTER_FLAVOR" then .value="traditional"
+                    elif .name=="RATE_LIMIT_POLICY" then .value="local"
+                    elif .name=="REDIS_HOST" then .value="focuspulse-cache-ji5gw7.serverless.aps1.cache.amazonaws.com"
                     else . end
                   )
               )
