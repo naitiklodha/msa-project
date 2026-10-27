@@ -20,10 +20,13 @@ def _embed_text(text: str) -> list[float]:
                 contents=text,
             )
             vector = result.embeddings[0].values
-            if len(vector) != VECTOR_DIM:
+            # Truncate to VECTOR_DIM (768) if model returns higher dims (e.g., gemini-embedding-001 = 3072)
+            if len(vector) > VECTOR_DIM:
+                vector = vector[:VECTOR_DIM]
+            elif len(vector) < VECTOR_DIM:
                 raise HTTPException(
                     status_code=500,
-                    detail=f"Embedding dimension mismatch. Expected {VECTOR_DIM}, got {len(vector)}.",
+                    detail=f"Embedding dimension too small. Expected {VECTOR_DIM}, got {len(vector)}.",
                 )
             return vector
         except Exception as exc:

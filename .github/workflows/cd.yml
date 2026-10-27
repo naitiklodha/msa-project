@@ -224,7 +224,7 @@ jobs:
                       elif .name=="KONG_ROUTER_FLAVOR" then .value="traditional"
                       elif .name=="RATE_LIMIT_POLICY" then .value="local"
                       elif .name=="REDIS_HOST" then .value="focuspulse-cache-ji5gw7.serverless.aps1.cache.amazonaws.com"
-                      elif .name=="GEMINI_EMBEDDING_MODEL" then .value="models/text-embedding-004"
+                      elif .name=="GEMINI_EMBEDDING_MODEL" then .value="gemini-embedding-001"
                       else . end
                     )
                 )
@@ -430,7 +430,7 @@ jobs:
                     elif .name=="KONG_ROUTER_FLAVOR" then .value="traditional"
                     elif .name=="RATE_LIMIT_POLICY" then .value="local"
                     elif .name=="REDIS_HOST" then .value="focuspulse-cache-ji5gw7.serverless.aps1.cache.amazonaws.com"
-                    elif .name=="GEMINI_EMBEDDING_MODEL" then .value="models/text-embedding-004"
+                    elif .name=="GEMINI_EMBEDDING_MODEL" then .value="gemini-embedding-001"
                     else . end
                   )
               )
