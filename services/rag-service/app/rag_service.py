@@ -562,7 +562,11 @@ def generate_questions(part_content: str, part_title: str) -> list[dict[str, Any
             logger.error(f"LLM returned empty response for generate_questions on '{part_title}'")
             raise ValueError("LLM returned empty response")
         parsed = json.loads(response_text)
-        questions = parsed.get("questions", parsed)
+        # Handle both formats: direct array [{...}] or object with "questions" key {"questions": [...]}
+        if isinstance(parsed, list):
+            questions = parsed
+        else:
+            questions = parsed.get("questions", parsed)
         if not questions:
             raise ValueError("LLM returned empty questions array")
         # Validate each question has required fields
