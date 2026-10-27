@@ -64,20 +64,30 @@ def generate_text_with_retry(prompt: str, max_attempts: int = 4) -> str:
     Call Gemini with exponential backoff and jitter for transient errors.
     Retries on: 429 (rate limit), 500, 502, 503, 504.
     """
+    retryable_codes = {429, 500, 502, 503, 504}
     for attempt in range(max_attempts):
         try:
             return generate_text(prompt)
-        except genai_errors.ServerError as exc:
-            if exc.code not in (429, 500, 502, 503, 504):
+        except genai_errors.APIError as exc:
+            if exc.code not in retryable_codes:
                 raise
             if attempt == max_attempts - 1:
+                logger.error(
+                    "Gemini failed after %s attempts: code=%s",
+                    max_attempts,
+                    exc.code,
+                )
                 raise
             delay = min(2 ** attempt, 8) + random.uniform(0, 1)
-            logger.warning(f"Gemini transient error (code={exc.code}), retrying in {delay:.1f}s (attempt {attempt + 1}/{max_attempts})")
+            logger.warning(
+                "Gemini transient error code=%s; "
+                "retrying in %.1fs (%s/%s)",
+                exc.code,
+                delay,
+                attempt + 1,
+                max_attempts,
+            )
             time.sleep(delay)
-        except Exception:
-            # Non-retryable error
-            raise
 
 
 def generate_text(prompt: str) -> str:
@@ -608,6 +618,7 @@ def generate_questions(part_content: str, part_title: str) -> list[dict[str, Any
         "]\n\n"
         f"CONTENT:\n{part_content}"
     )
+    response_text = ""
     try:
         response_text = generate_text_with_retry(prompt)
         logger.info(f"generate_questions raw response (first 1000): {response_text[:1000]}")
