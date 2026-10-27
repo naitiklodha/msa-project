@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS user_documents (
 );
 
 -- Chunks (with Vector Embeddings for RAG)
+-- Using 768 dimensions to match text-embedding-004 model output
 CREATE TABLE IF NOT EXISTS document_chunks (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
@@ -101,7 +102,7 @@ CREATE TABLE IF NOT EXISTS document_chunks (
     topic TEXT,
     time_est_s INT,
     content TEXT NOT NULL,
-    embedding VECTOR(1536) NOT NULL,
+    embedding VECTOR(768) NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

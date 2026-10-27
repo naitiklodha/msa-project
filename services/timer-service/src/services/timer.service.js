@@ -35,6 +35,13 @@ function timerService({ pgPool, redis, produce }) {
       durationMinutes * 60 + 300 // auto-expire a bit after the session should end
     );
 
+    // Emit timer event for analytics
+    await produce('timer-events', 'FOCUS_SESSION_STARTED', {
+      userId: session.user_id,
+      sessionId: session.id,
+      durationMinutes: session.duration_minutes,
+    });
+
     logger.info({ msg: 'Focus session started', userId, sessionId: session.id });
     return session;
   };
@@ -84,11 +91,18 @@ function timerService({ pgPool, redis, produce }) {
       durationMinutes: session.duration_minutes,
     });
 
+    // Emit timer event for analytics
+    await produce('timer-events', 'FOCUS_SESSION_COMPLETED', {
+      userId: session.user_id,
+      sessionId: session.id,
+      durationMinutes: session.duration_minutes,
+    });
+
     logger.info({ msg: 'Focus session completed', userId, sessionId });
     return session;
   };
 
-  // Quit early. No event, no reward.
+  // Quit early. No shame, but no reward.
   const abandonSession = async (userId, sessionId) => {
     const result = await pgPool.query(
       `UPDATE focus_sessions
@@ -105,6 +119,12 @@ function timerService({ pgPool, redis, produce }) {
     }
 
     await redis.del(`active_session:${userId}`);
+
+    // Emit timer event for analytics
+    await produce('timer-events', 'FOCUS_SESSION_ABANDONED', {
+      userId,
+      sessionId,
+    });
 
     logger.info({ msg: 'Focus session abandoned', userId, sessionId });
     return result.rows[0];
