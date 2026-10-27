@@ -29,6 +29,18 @@ llm_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 def generate_text(prompt: str) -> str:
     response = llm_client.models.generate_content(model=LLM_MODEL, contents=prompt)
+    logger.info(f"LLM raw response: model={LLM_MODEL}, text_len={len(response.text) if response.text else 0}, candidates={len(response.candidates) if response.candidates else 0}")
+    if response.candidates:
+        for i, c in enumerate(response.candidates):
+            logger.info(f"  Candidate {i}: finish_reason={c.finish_reason}, safety_ratings={c.safety_ratings}")
+            if c.content and c.content.parts:
+                for part in c.content.parts:
+                    if part.text:
+                        logger.info(f"    Part text len={len(part.text)}: {part.text[:200]}")
+    if response.text:
+        logger.info(f"LLM response.text (first 500): {response.text[:500]}")
+    else:
+        logger.warning(f"LLM response.text is empty/falsy! Full response: {response}")
     return response.text or ""
 
 
@@ -545,6 +557,10 @@ def generate_questions(part_content: str, part_title: str) -> list[dict[str, Any
     )
     try:
         response_text = generate_text(prompt)
+        logger.info(f"generate_questions raw response (first 1000): {response_text[:1000]}")
+        if not response_text or not response_text.strip():
+            logger.error(f"LLM returned empty response for generate_questions on '{part_title}'")
+            raise ValueError("LLM returned empty response")
         parsed = json.loads(response_text)
         questions = parsed.get("questions", parsed)
         if not questions:
@@ -557,6 +573,9 @@ def generate_questions(part_content: str, part_title: str) -> list[dict[str, Any
                 raise ValueError(f"Question must have 4 options: {q}")
         logger.info(f"Generated {len(questions)} questions for topic: {part_title}")
         return questions
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode failed for generate_questions on '{part_title}': {e}. Response was: {response_text[:2000]}")
+        raise
     except Exception as e:
         logger.error(f"Gemini generate_questions error for '{part_title}': {str(e)}")
         raise
@@ -583,10 +602,17 @@ def summarize_text(text: str) -> dict[str, Any]:
     try:
         logger.info(f"Summarizing with {LLM_MODEL}...")
         response_text = generate_text(prompt)
+        logger.info(f"summarize_text raw response (first 1000): {response_text[:1000]}")
+        if not response_text or not response_text.strip():
+            logger.error(f"LLM returned empty response for summarize_text")
+            return {"number_of_parts": 0, "parts": []}
         data = json.loads(response_text)
         if "parts" not in data or not data["parts"]:
             return {"number_of_parts": 0, "parts": []}
         return data
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON decode failed for summarize_text: {e}. Response was: {response_text[:2000]}")
+        return {"number_of_parts": 0, "parts": []}
     except Exception as e:
         logger.error(f"Gemini summarize_text error: {str(e)}")
         return {"number_of_parts": 0, "parts": []}
