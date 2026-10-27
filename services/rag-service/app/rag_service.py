@@ -1,5 +1,6 @@
 import json
 import logging
+import random
 import re
 import time
 import hashlib
@@ -7,6 +8,7 @@ from typing import Any, Generator
 
 from fastapi import HTTPException
 from google import genai
+from google.genai import errors as genai_errors
 
 from .config import GOOGLE_API_KEY, LLM_MODEL
 from .db import get_connection
@@ -25,6 +27,57 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 llm_client = genai.Client(api_key=GOOGLE_API_KEY)
+
+
+def parse_json_response(response_text: str) -> Any:
+    """
+    Parse JSON from LLM response, handling Markdown code fences and extra text.
+    Handles formats like:
+    - ```json {...} ```
+    - ```json [...] ```
+    - Plain JSON
+    - JSON embedded in explanatory text
+    """
+    text = response_text.strip()
+    # Remove Markdown code fences such as ```json ... ``` or ``` ... ```
+    text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*```$", "", text)
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # Recover a JSON array/object if extra text surrounds it
+        start_array = text.find("[")
+        start_object = text.find("{")
+        starts = [i for i in (start_array, start_object) if i >= 0]
+        if not starts:
+            raise ValueError("Gemini response contains no JSON")
+        start = min(starts)
+        end = max(text.rfind("]"), text.rfind("}"))
+        if end < start:
+            raise ValueError("Gemini returned incomplete JSON")
+        return json.loads(text[start:end + 1])
+
+
+def generate_text_with_retry(prompt: str, max_attempts: int = 4) -> str:
+    """
+    Call Gemini with exponential backoff and jitter for transient errors.
+    Retries on: 429 (rate limit), 500, 502, 503, 504.
+    """
+    for attempt in range(max_attempts):
+        try:
+            return generate_text(prompt)
+        except genai_errors.ServerError as exc:
+            if exc.code not in (429, 500, 502, 503, 504):
+                raise
+            if attempt == max_attempts - 1:
+                raise
+            delay = min(2 ** attempt, 8) + random.uniform(0, 1)
+            logger.warning(f"Gemini transient error (code={exc.code}), retrying in {delay:.1f}s (attempt {attempt + 1}/{max_attempts})")
+            time.sleep(delay)
+        except Exception:
+            # Non-retryable error
+            raise
 
 
 def generate_text(prompt: str) -> str:
@@ -556,12 +609,12 @@ def generate_questions(part_content: str, part_title: str) -> list[dict[str, Any
         f"CONTENT:\n{part_content}"
     )
     try:
-        response_text = generate_text(prompt)
+        response_text = generate_text_with_retry(prompt)
         logger.info(f"generate_questions raw response (first 1000): {response_text[:1000]}")
         if not response_text or not response_text.strip():
             logger.error(f"LLM returned empty response for generate_questions on '{part_title}'")
             raise ValueError("LLM returned empty response")
-        parsed = json.loads(response_text)
+        parsed = parse_json_response(response_text)
         # Handle both formats: direct array [{...}] or object with "questions" key {"questions": [...]}
         if isinstance(parsed, list):
             questions = parsed
@@ -577,8 +630,8 @@ def generate_questions(part_content: str, part_title: str) -> list[dict[str, Any
                 raise ValueError(f"Question must have 4 options: {q}")
         logger.info(f"Generated {len(questions)} questions for topic: {part_title}")
         return questions
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode failed for generate_questions on '{part_title}': {e}. Response was: {response_text[:2000]}")
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error(f"Failed to parse Gemini response for generate_questions on '{part_title}': {e}. Response was: {response_text[:2000]}")
         raise
     except Exception as e:
         logger.error(f"Gemini generate_questions error for '{part_title}': {str(e)}")
@@ -605,17 +658,17 @@ def summarize_text(text: str) -> dict[str, Any]:
     )
     try:
         logger.info(f"Summarizing with {LLM_MODEL}...")
-        response_text = generate_text(prompt)
+        response_text = generate_text_with_retry(prompt)
         logger.info(f"summarize_text raw response (first 1000): {response_text[:1000]}")
         if not response_text or not response_text.strip():
             logger.error(f"LLM returned empty response for summarize_text")
             return {"number_of_parts": 0, "parts": []}
-        data = json.loads(response_text)
+        data = parse_json_response(response_text)
         if "parts" not in data or not data["parts"]:
             return {"number_of_parts": 0, "parts": []}
         return data
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode failed for summarize_text: {e}. Response was: {response_text[:2000]}")
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error(f"Failed to parse Gemini response for summarize_text: {e}. Response was: {response_text[:2000]}")
         return {"number_of_parts": 0, "parts": []}
     except Exception as e:
         logger.error(f"Gemini summarize_text error: {str(e)}")
