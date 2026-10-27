@@ -172,7 +172,7 @@ def process_upload(file_bytes: bytes, file_name: str, extracted_text: str, user_
                         )
                     
                     # STAGGER: Wait slightly between chunks to avoid rate limiting
-                    time.sleep(1.5)
+                    time.sleep(0.5)
         conn.commit()
 
     # Backfill Cache & Link

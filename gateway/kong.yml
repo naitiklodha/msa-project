@@ -75,8 +75,8 @@ services:
   - name: rag-service
     url: $(env "RAG_SERVICE_URL")
     connect_timeout: 10000
-    read_timeout: 60000
-    write_timeout: 60000
+    read_timeout: 300000
+    write_timeout: 300000
     routes:
       - name: rag-public
         paths:
