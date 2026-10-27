@@ -152,6 +152,11 @@ def process_upload(file_bytes: bytes, file_name: str, extracted_text: str, user_
                     
                     # Generate questions for this chunk
                     questions = generate_questions(chunk_text_val, topic_title)
+                    if not questions:
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Failed to generate questions for chunk {chunk_idx} of topic '{topic_title}'"
+                        )
                     for q in questions:
                         cur.execute(
                             """
@@ -540,11 +545,21 @@ def generate_questions(part_content: str, part_title: str) -> list[dict[str, Any
     )
     try:
         response_text = generate_text(prompt)
-        print(json.loads(response_text).get("questions", json.loads(response_text)))
-        return json.loads(response_text).get("questions", json.loads(response_text))
+        parsed = json.loads(response_text)
+        questions = parsed.get("questions", parsed)
+        if not questions:
+            raise ValueError("LLM returned empty questions array")
+        # Validate each question has required fields
+        for q in questions:
+            if not all(k in q for k in ("question", "options", "correct_index", "difficulty")):
+                raise ValueError(f"Invalid question format: {q}")
+            if not isinstance(q["options"], list) or len(q["options"]) != 4:
+                raise ValueError(f"Question must have 4 options: {q}")
+        logger.info(f"Generated {len(questions)} questions for topic: {part_title}")
+        return questions
     except Exception as e:
-        logger.error(f"Gemini generate_questions error: {str(e)}")
-        return []
+        logger.error(f"Gemini generate_questions error for '{part_title}': {str(e)}")
+        raise
 
 
 def summarize_text(text: str) -> dict[str, Any]:
