@@ -147,7 +147,7 @@ const Dashboard = () => {
             transition={{ duration: 0.6, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
             className="font-display text-label-sm text-fg-tertiary uppercase tracking-[0.4em] mt-2"
           >
-            Neural Network // Sector Alpha-9 // Active Sector
+            Neural  // Sector Alpha-9 // Active Sector
           </motion.p>
         </div>
         <motion.div
